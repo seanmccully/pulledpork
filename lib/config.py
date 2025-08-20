@@ -164,6 +164,11 @@ class Config:
 
         # Non-critical checks
 
+        if self.defined('local_rules_folder'):
+            self.local_rules_folder = Path(self.local_rules_folder)
+            if not (self.local_rules_folder.exists() and
+               self.local_rules_folder.is_dir()):
+                self.local_rules_folder = None
         # If additional local_rules are not set, default to empty list
         # Otherwise create a list from the value
         if not self.defined('local_rules'):
@@ -269,8 +274,8 @@ class Config:
 
         # Enabled more than one official ruleset?
         num_enabled_rulesets = [self.community_ruleset, self.registered_ruleset, self.lightspd_ruleset].count(True)
-        if num_enabled_rulesets > 1:
-            log.warning('More than one official ruleset is selected; not recommended since there is a lot of overlap')
+        if num_enabled_rulesets > 2:
+            log.warning('More than two official ruleset is selected; not recommended since there is a lot of overlap')
 
         # Increment the enabled count if we have local rules enabled
         if self.defined('local_rules'):
