@@ -1,0 +1,93 @@
+import os.path
+from pathlib import Path
+from shutil import rmtree
+
+from . import logger
+
+
+__all__ = [
+    'WorkingDirectory'
+]
+
+
+################################################################################
+# Logging
+################################################################################
+
+log = logger.Logger()
+
+
+################################################################################
+# WorkingDirectory - Temporary directory helper
+################################################################################
+
+class WorkingDirectory:
+
+    __slots__ = [
+        'temp_path',
+        'dir_name',
+        'path',
+        'downloaded_path',
+        'extracted_path',
+        'so_rules_path',
+        'cleanup_on_exit'
+    ]
+
+    def __init__(self, temp_path, dir_name, cleanup_on_exit=True):
+        '''
+        Setup the working directory and structure
+        '''
+
+        # Save the bits
+        self.temp_path = Path(temp_path)
+        self.dir_name = dir_name
+        self.path = Path(self.temp_path).joinpath(self.dir_name)
+        self.downloaded_path = self.path.joinpath('downloaded_rulesets')
+        self.extracted_path = self.path.joinpath('extracted_rulesets')
+        self.so_rules_path = self.path.joinpath('so_rules')
+        self.cleanup_on_exit = cleanup_on_exit
+
+        # Prepare things
+        self._setup()
+
+    def __repr__(self):
+        return f'WorkingDirectory(path:{self.path}, cleanup_on_exit:{self.cleanup_on_exit})'
+
+    def __del__(self):
+        '''
+        Clean up the temprary folder if required
+        '''
+
+        log.debug('---------------------------------')
+
+        # Not cleaning up?
+        if not self.cleanup_on_exit:
+            log.verbose(f'Not deleting working directory: {self.path}')
+            return
+
+        log.verbose(f'Attempting to delete working directory: {self.path}')
+        try:
+            rmtree(self.path)
+        except Exception as e:
+            log.warning(f'Unable to delete working directory: {e}')
+        else:
+            log.verbose(' - Successfully deleted working directory')
+
+    def _setup(self):
+        '''
+        Create the directory structure we'll be using
+        '''
+
+        log.verbose(f'Setting up the working directory structure in: {self.path}')
+
+        # Create all the directories
+        try:
+            if not self.path.exists():
+                self.path.mkdir(parents=True)
+            self.downloaded_path.mkdir()
+            self.extracted_path.mkdir()
+            self.so_rules_path.mkdir()
+        except Exception as e:
+            log.error(f'Setup of the working directory failed: {e}')
+        else:
+            log.verbose(f' - Successfully setup the working directory')
