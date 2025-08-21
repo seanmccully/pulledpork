@@ -68,6 +68,12 @@ class SnortRuleParser:
         except Exception as e:
             print(f"Error reading log file: {e}")
             sys.exit(1)
+        from ipdb import set_trace;set_trace()
+        for so_error in so_errors:
+            rule_file = so_error["rule_file"]
+            line_num = so_error['rule_line']
+            rules_file = Path(f'/etc/snort/rules/{rule_file}')
+            self.comment_out_rule(rules_file, int(line_num))
 
         return so_errors, duplicate_errors
 
