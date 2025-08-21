@@ -1,9 +1,11 @@
 import io
+import shutil
 import os
 import re
 import hashlib
 import tarfile
 from enum import Enum
+from pathlib import Path
 
 import requests
 
@@ -417,57 +419,181 @@ class Rule:
 ################################################################################
 
 class Rules:
-
-    __slots__ = [
-        '_all_rules',
-        'metadata'
-    ]
-
-    def __init__(self, rules_path=None, local_rules_path=None, ignored_files=[], **metadata):
-        '''
-        Load all the rule files from the given rules path, except those
-        that will be ignored
-
-        Example:
-        >>> txt = Rules('../rules')
-        >>> txt
-        Rules(loaded:41987, enabled:41987, disabled:0)
-        '''
-
-        # Setup the rules cache and save the metadata
+    """
+    """
+    def __init__(self, rules_path=None, ignored_files=[], track_files=False, **metadata):
+        """
+        Load all the rule files from the given rules path
+        track_files: If True, maintain mapping of rules to source files
+        """
         self._all_rules = {}
+        self._rules_by_file = {} if track_files else None
+        self.track_files = track_files
         self.metadata = metadata
 
-        if local_rules_path:
-            self.local_rules_path = Path(local_rules_path)
-        # No rules to process?
         if rules_path is None:
             return
 
-        # Is source a directory?
-        rules_path = Path(rules_path):
+        rules_path = Path(rules_path)
         if rules_path.is_dir():
-
-            # Work through the files in the given path
             for rules_file in rules_path.rglob("*.rules"):
-
                 if rules_file.name in ignored_files:
                     continue
-
-                # Attempt to load the file
-                self.load_file(rules_file.path)
-
-        # Is it a fiie?
-        elif os.path.isfile(rules_path):
-
-            # This disregards the ignored file lists
-
-            # Attempt to load the file
+                self.load_file(rules_file)
+        elif rules_path.is_file():
             self.load_file(rules_path)
-
-        # File or folder not present, raise an exception
         else:
             raise FileNotFoundError(rules_path)
+
+    def load_file(self, rules_file):
+        '''Load a rules file with optional tracking'''
+        rules_file = Path(rules_file)
+        metadata = self.metadata.copy()
+
+        # Initialize tracking for this file
+        if self.track_files:
+            if str(rules_file) not in self._rules_by_file:
+                self._rules_by_file[str(rules_file)] = []
+
+        with rules_file.open('r') as fh:
+            metadata['file_path'] = str(rules_file)
+            metadata['file_name'] = rules_file.name
+
+            for line_num, line in enumerate(fh.readlines(), 1):
+                line = line.strip()
+
+                if not line or 'sid:' not in line or '(' not in line:
+                    continue
+                if line.startswith('###### PULLED BY '):
+                    continue
+
+                try:
+                    new_rule = Rule(line, **metadata)
+                except ValueError as e:
+                    log.verbose(f'{rules_file}:{line_num} - {e}')
+                    continue
+
+                # Check for existing rule with same ID
+                if new_rule.rule_id in self._all_rules:
+                    current_rule = self[new_rule.rule_id]
+                    if int(current_rule.rev) >= int(new_rule.rev):
+                        log.verbose(f'{rules_file}:{line_num} - Duplicate rule_id with same/earlier rev; skipping')
+                        continue
+
+                self._all_rules[new_rule.rule_id] = new_rule
+
+                # Track which file this rule came from
+                if self.track_files:
+                    self._rules_by_file[str(rules_file)].append(new_rule.rule_id)
+
+    def update_local_files(self, local_rules_folder, backup=True, dry_run=False):
+        '''
+        Update local rule files with newer revisions
+        Returns dict of updated files and their statistics
+        '''
+        if not self.track_files or not self._rules_by_file:
+            raise ValueError("Rule tracking not enabled - use track_files=True")
+
+        local_rules_folder = Path(local_rules_folder)
+        update_stats = {}
+
+        # Process each source file we loaded
+        for source_file_path, rule_ids in self._rules_by_file.items():
+            source_file = Path(source_file_path)
+            local_file = local_rules_folder / source_file.name
+
+            if not local_file.exists():
+                log.verbose(f'No matching local file for {source_file.name}')
+                continue
+
+            log.info(f'Processing local file: {local_file.name}')
+
+            # Read existing local rules
+            local_rules = {}
+            local_lines = []
+
+            with local_file.open('r') as f:
+                for line_num, line in enumerate(f, 1):
+                    local_lines.append(line)
+
+                    # Parse rule if it contains sid
+                    if 'sid:' in line and not line.strip().startswith('###### PULLED BY'):
+                        try:
+                            # Parse without modifying state
+                            temp_line = line.strip()
+                            if temp_line.startswith('#'):
+                                temp_line = temp_line[1:].strip()
+
+                            sid_match = re.search(r'sid:(\d+);', temp_line)
+                            gid_match = re.search(r'gid:(\d+);', temp_line)
+                            rev_match = re.search(r'rev:(\d+);', temp_line)
+
+                            if sid_match:
+                                sid = sid_match.group(1)
+                                gid = gid_match.group(1) if gid_match else '1'
+                                rev = rev_match.group(1) if rev_match else '0'
+                                rule_id = f'{gid}:{sid}'
+
+                                local_rules[rule_id] = {
+                                    'line_num': line_num - 1,  # 0-indexed for list
+                                    'rev': rev,
+                                    'original_line': line
+                                }
+                        except Exception as e:
+                            log.debug(f'Error parsing rule at line {line_num}: {e}')
+
+            # Track updates
+            updates = 0
+            additions = 0
+
+            # Update existing rules and add new ones
+            for rule_id in rule_ids:
+                if rule_id not in self._all_rules:
+                    continue
+
+                new_rule = self._all_rules[rule_id]
+
+                if rule_id in local_rules:
+                    # Update if newer revision
+                    local_rev = int(local_rules[rule_id]['rev'])
+                    new_rev = int(new_rule.rev)
+
+                    if new_rev > local_rev:
+                        line_idx = local_rules[rule_id]['line_num']
+                        local_lines[line_idx] = new_rule.stateful_text + '\n'
+                        updates += 1
+                        log.debug(f'  Updated {rule_id}: rev {local_rev} -> {new_rev}')
+                else:
+                    # New rule - append to file
+                    local_lines.append(new_rule.stateful_text + '\n')
+                    additions += 1
+                    log.debug(f'  Added new rule {rule_id}')
+
+            # Write updates if any changes made
+            if updates > 0 or additions > 0:
+                if dry_run:
+                    log.info(f'  [DRY RUN] Would update {local_file.name}: {updates} updates, {additions} additions')
+                else:
+                    # Backup original
+                    if backup:
+                        backup_file = local_file.with_suffix('.bak')
+                        shutil.copy2(local_file, backup_file)
+                        log.verbose(f'  Created backup: {backup_file}')
+
+                    # Write updated content
+                    with local_file.open('w') as f:
+                        f.writelines(local_lines)
+
+                    log.info(f'  Updated {local_file.name}: {updates} updates, {additions} additions')
+
+                update_stats[str(local_file)] = {
+                    'updates': updates,
+                    'additions': additions
+                }
+            else:
+                log.verbose(f'  No updates needed for {local_file.name}')
+
+        return update_stats
 
     def __repr__(self):
 
@@ -584,6 +710,7 @@ class Rules:
         >>> txt
         Rules(loaded:244, enabled:244, disabled:0)
         '''
+        rules_file = Path(rules_file)
 
         # We'll use a copy
         metadata = self.metadata.copy()
@@ -593,7 +720,7 @@ class Rules:
 
             # Save the filename bits to the metadata
             metadata['file_path'] = rules_file
-            metadata['file_name'] = os.path.basename(rules_file)
+            metadata['file_name'] = rules_file.name
 
             for line_num, line in enumerate(fh.readlines(), 1):
 
@@ -642,9 +769,10 @@ class Rules:
         >>>
         >>> txt.write_file('pulledpork.rules', include_disabled=True)
         '''
+        rules_file = Path(rules_file)
 
         # Open the file for writing
-        with open(rules_file, 'w') as fh:
+        with rules_file.open('w') as fh:
 
             # Write a file header?
             if header is not None:
@@ -1107,9 +1235,9 @@ class Policy:
         >>> pol
         Policy(name:custom, rules:8579)
         '''
-
+        policy_file = Path(policy_file)
         # Work through the policy file
-        with open(policy_file, 'r') as fh:
+        with policy_file.open('r') as fh:
             for line in fh.readlines():
 
                 # Strip the line
@@ -1190,9 +1318,9 @@ class Policy:
         '''
         Write a single policy to a states file
         '''
-
+        policy_file = Path(policy_file)
         # Open the file for writing
-        with open(policy_file, 'w') as fh:
+        with policy_file.open('w') as fh:
 
             # Write a file header?
             if header is not None:
@@ -1541,19 +1669,6 @@ class RulesArchive:
 
         # Return the ruleset
         return self._ruleset
-
-    def load_file(self, rules_path):
-        '''
-        Load a archive file
-        '''
-
-        # Save the bits
-        self.source = rules_path
-        self.filename = os.path.basename(rules_path)
-
-        # Open and read the file into _data
-        with open(rules_path, 'rb') as fh:
-            self._data = fh.read()
 
     def load_url(self, rules_url, oinkcode=None):
         '''

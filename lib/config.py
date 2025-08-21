@@ -162,15 +162,26 @@ class Config:
                     out_list.append(thing)
             return out_list
 
-        # Non-critical checks
+       # Otherwise create a list from the value
+        # Check for local_rules_folder if in update mode
+        if self.defined('update_mode'):
+            if self.update_mode not in ('merge', 'update'):
+                log.error('`update_mode` must be either "merge" or "update"')
 
-        if self.defined('local_rules_folder'):
-            self.local_rules_folder = Path(self.local_rules_folder)
-            if not (self.local_rules_folder.exists() and
-               self.local_rules_folder.is_dir()):
-                self.local_rules_folder = None
-        # If additional local_rules are not set, default to empty list
-        # Otherwise create a list from the value
+            if self.update_mode == 'update':
+                if not self.defined('local_rules_folder'):
+                    log.error('`local_rules_folder` required when update_mode is "update"')
+                elif not validate_dir_path(self.local_rules_folder):
+                    log.error(f'`local_rules_folder` does not exist: {self.local_rules_folder}')
+                else:
+                    self.local_rules_folder = Path(self.local_rules_folder)
+        else:
+            self.update_mode = 'merge'  # Default to legacy behavior
+
+        # Add dry_run option
+        if not self.defined('dry_run'):
+            self.dry_run = False
+
         if not self.defined('local_rules'):
             self.local_rules = []
         else:

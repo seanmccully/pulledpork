@@ -252,253 +252,173 @@ def main():
     # -----------------------------------------------------------------------------
     # PROCESS RULESETS HERE
 
-    log.debug('---------------------------------')
-    log.verbose('Processing rulesets')
+	log.debug('---------------------------------')
+	log.verbose('Processing rulesets')
 
-    all_new_rules = Rules()
-    all_new_policies = Policies()
+	# Check if we're in update mode
+	if conf.defined('update_mode') and conf.update_mode == 'update' and conf.defined('local_rules_folder'):
+		log.info('Running in UPDATE mode - will update individual rule files')
 
-    for loaded_ruleset in loaded_rulesets:
+		# Process each ruleset separately for update mode
+		total_stats = {}
 
-        # Save the extracted path to a shorter named var
-        ruleset_path = loaded_ruleset.extracted_path
+		for loaded_ruleset in loaded_rulesets:
+			ruleset_path = loaded_ruleset.extracted_path
 
-        # determine ruleset type:
-        if loaded_ruleset.ruleset == RulesetTypes.COMMUNITY:
+			if loaded_ruleset.ruleset == RulesetTypes.REGISTERED:
+				log.info('Processing Registered ruleset for updates')
 
-            log.info('Processing Community ruleset')
-            log.verbose(f' - Ruleset path:  {ruleset_path}')
+				# Load rules with file tracking
+				merge_rules_path(conf, ruleset_path.joinpath('rules'))
 
-            # only simple rules to worry about
-            # community rules have an extra folder to delve into
-            rule_path = ruleset_path.joinpath('snort3-community-rules')
+			elif loaded_ruleset.ruleset == RulesetTypes.LIGHTSPD:
+				# Similar processing for LightSPD if needed
+				log.info('Processing LightSPD ruleset for updates')
+				lightspd_rules, lightspd_policies = process_lightspd_files(conf, ruleset_path)
 
-            # todo: wrap next line in try/catch
-            community_rules = Rules(rule_path, conf.ignored_files)
+				merge_rules_path(conf, ruleset_path.joinpath('lightspd', 'rules'))
 
-            # Generate the community policy from the rules
-            # commmunity rules don't come with a policy file, so create one (in case the rule_mode = policy)
-            community_policy = community_rules.policy_from_state(conf.ips_policy)
+				text_rules, text_policies = process_rules_files(conf, ruleset_path.joinpath('lightspd','rules'))
+				builtin_rules, builtin_policies = process_rules_files(conf, ruleset_path.joinpath('lightspd', 'bVuiltin'))
 
-            log.verbose('Finished processing Community ruleset')
-            log.verbose(f' - Community Rules:  {community_rules}')
-            log.verbose(f' - Community Policy:  {community_policy}')
+			elif loaded_ruleset.ruleset == RulesetTypes.COMMUNITY:
+				log.info('Processing Community ruleset for updates')
+				# ... similar logic
 
-            all_new_rules.extend(community_rules)
-            all_new_policies.extend(community_policy)
+		# Summary
+		log.info('Update Summary:')
+		total_updates = sum(s['updates'] for s in total_stats.values())
+		total_additions = sum(s['additions'] for s in total_stats.values())
+		log.info(f'  Total files modified: {len(total_stats)}')
+		log.info(f'  Total rules updated: {total_updates}')
+		log.info(f'  Total rules added: {total_additions}')
 
-        elif loaded_ruleset.ruleset == RulesetTypes.REGISTERED:
+	else:
+    # Original merge mode processing
+		log.info('Running in MERGE mode - will create single rules file')
+		log.debug('---------------------------------')
+		log.verbose('Processing rulesets')
 
-            log.info('Processing Registered ruleset')
-            log.verbose(f' - Ruleset path:  {ruleset_path}')
+		all_new_rules = Rules()
+		all_new_policies = Policies()
 
-            # process text rules
-            text_rules_path = ruleset_path.joinpath('rules')
-            registered_rules = Rules(text_rules_path, conf.ignored_files)
-            registered_policies = Policies(text_rules_path)
+		for loaded_ruleset in loaded_rulesets:
 
-            log.debug(f' - Text Rules:  {registered_rules}')
-            log.debug(f' - Text Policies:  {registered_policies}')
+			# Save the extracted path to a shorter named var
+			ruleset_path = loaded_ruleset.extracted_path
 
-            # process builtin rules
-            builtin_rules_path = ruleset_path.joinpath('builtins')
-            builtin_rules = Rules(builtin_rules_path)
-            builtin_policies = Policies(builtin_rules_path)
+			# determine ruleset type:
+			if loaded_ruleset.ruleset == RulesetTypes.COMMUNITY:
 
-            log.debug(f' - Builtin Rules:  {builtin_rules}')
-            log.debug(f' - Builtin Policies:  {builtin_policies}')
+				log.info('Processing Community ruleset')
+				log.verbose(f' - Ruleset path:  {ruleset_path}')
 
-            registered_rules.extend(builtin_rules)
-            registered_policies.extend(builtin_policies)
+				# only simple rules to worry about
+				# community rules have an extra folder to delve into
+				rule_path = ruleset_path.joinpath('snort3-community-rules')
 
-            # process so rules
-            if conf.defined('sorule_path'):
-                # copy files first to temp\so_rules folder (we'll copy them all at the end, this checks for dupes)
-                # todo: error handling
-                so_src_folder = ruleset_path.joinpath('so_rules', 'precompiled', conf.distro)
-                src_files = listdir(so_src_folder)
-                for file_name in src_files:
-                    full_file_name = so_src_folder.joinpath(file_name)
-                    if isfile(full_file_name):
-                        copy(full_file_name, working_dir.so_rules_path)
+				# todo: wrap next line in try/catch
+				community_rules = Rules(rule_path, conf.ignored_files)
 
-                # get SO rule stubs
-                # todo: generate stubs if distro folder doesn't exist
-                so_rules_path = ruleset_path.joinpath('so_rules')
+				# Generate the community policy from the rules
+				# commmunity rules don't come with a policy file, so create one (in case the rule_mode = policy)
+				community_policy = community_rules.policy_from_state(conf.ips_policy)
 
-                so_rules = Rules(so_rules_path)
-                so_policies = Policies(so_rules_path)
+				log.verbose('Finished processing Community ruleset')
+				log.verbose(f' - Community Rules:  {community_rules}')
+				log.verbose(f' - Community Policy:  {community_policy}')
 
-                log.debug(f' - SO Rules:  {so_rules}')
-                log.debug(f' - SO Policies:  {so_policies}')
+				all_new_rules.extend(community_rules)
+				all_new_policies.extend(community_policy)
 
-                registered_rules.extend(so_rules)
-                registered_policies.extend(so_policies)
+			elif loaded_ruleset.ruleset == RulesetTypes.REGISTERED:
 
-            log.verbose(f'Preparing to apply policy {conf.ips_policy} to Registered rules')
-            log.debug(f' - Registered rules before policy application:  {registered_rules}')
+				log.info('Processing Registered ruleset')
+				log.verbose(f' - Ruleset path:  {ruleset_path}')
 
-            # apply the policy to these rules
-            registered_rules.apply_policy(registered_policies[conf.ips_policy])
+				# process text rules
+				text_rules_path = ruleset_path.joinpath('rules')
+				registered_rules = Rules(text_rules_path, conf.ignored_files)
+				registered_policies = Policies(text_rules_path)
 
-            log.verbose('Finished processing Registered ruleset')
-            log.verbose(f' - Registered Rules:  {registered_rules}')
-            log.verbose(f' - Registered Policies:  {registered_policies}')
+				log.debug(f' - Text Rules:  {registered_rules}')
+				log.debug(f' - Text Policies:  {registered_policies}')
 
-            all_new_rules.extend(registered_rules)
-            all_new_policies.extend(registered_policies)
+				# process builtin rules
+				builtin_rules_path = ruleset_path.joinpath('builtins')
+				builtin_rules = Rules(builtin_rules_path)
+				builtin_policies = Policies(builtin_rules_path)
 
-        elif loaded_ruleset.ruleset == RulesetTypes.LIGHTSPD:
+				log.debug(f' - Builtin Rules:  {builtin_rules}')
+				log.debug(f' - Builtin Policies:  {builtin_policies}')
 
-            log.info('Processing LightSPD ruleset')
-            log.verbose(f' - Ruleset path:  {ruleset_path}')
+				registered_rules.extend(builtin_rules)
+				registered_policies.extend(builtin_policies)
 
-            lightspd_rules = Rules()
-            lightspd_policies = Policies()
+				# process so rules
+				if conf.defined('sorule_path'):
+					# copy files first to temp\so_rules folder (we'll copy them all at the end, this checks for dupes)
+					# todo: error handling
+					so_src_folder = ruleset_path.joinpath('so_rules', 'precompiled', conf.distro)
+					src_files = listdir(so_src_folder)
+					for file_name in src_files:
+						full_file_name = so_src_folder.joinpath(file_name)
+						if isfile(full_file_name):
+							copy(full_file_name, working_dir.so_rules_path)
 
-            # load .so rules IFF sorule_path is configured.
-            # if 'distro' is not configured, then we need to compile the rules ourself
-            # right now: we only use the manifest.json file for processing .so rules
-            if conf.defined('sorule_path') and conf.defined('distro'):
-                log.debug('Trying to load precompiled so rules')
-                json_manifest_file = ruleset_path.joinpath('lightspd','manifest.json')
+					# get SO rule stubs
+					# todo: generate stubs if distro folder doesn't exist
+					so_rules_path = ruleset_path.joinpath('so_rules')
 
-                # load json manifest file to identify .so rules location
-                log.debug(f"Processing json manifest file {json_manifest_file}")
-                with open(json_manifest_file) as f:
-                    manifest = load(f)
+					so_rules = Rules(so_rules_path)
+					so_policies = Policies(so_rules_path)
 
-                # Get all available versions from manifest
-                manifest_versions = list(manifest["snort versions"].keys())
-                log.debug(f'Found {len(manifest_versions)} versions in manifest: {manifest_versions}')
+					log.debug(f' - SO Rules:  {so_rules}')
+					log.debug(f' - SO Policies:  {so_policies}')
 
-                # Convert our Snort version to tuple
-                snort_version_tuple = version_to_tuple(conf.snort_version)
-                log.debug(f'Snort version {conf.snort_version} converted to tuple: {snort_version_tuple}')
+					registered_rules.extend(so_rules)
+					registered_policies.extend(so_policies)
 
-                # Find the best matching version (highest version <= our Snort version)
-                best_match = None
-                best_match_tuple = (0, 0, 0, 0, 0)
+				log.verbose(f'Preparing to apply policy {conf.ips_policy} to Registered rules')
+				log.debug(f' - Registered rules before policy application:  {registered_rules}')
 
-                for manifest_version in manifest_versions:
-                    manifest_tuple = version_to_tuple(manifest_version)
-                    log.debug(f'Checking manifest version {manifest_version} (tuple: {manifest_tuple})')
+				# apply the policy to these rules
+				registered_rules.apply_policy(registered_policies[conf.ips_policy])
 
-                    # Check if this version is <= our Snort version and better than current best
-                    if manifest_tuple <= snort_version_tuple and manifest_tuple > best_match_tuple:
-                        best_match = manifest_version
-                        best_match_tuple = manifest_tuple
-                        log.debug(f'  -> New best match: {best_match}')
+				log.verbose('Finished processing Registered ruleset')
+				log.verbose(f' - Registered Rules:  {registered_rules}')
+				log.verbose(f' - Registered Policies:  {registered_policies}')
 
-                if best_match is None:
-                    log.warning(f"No compatible version found in LightSPD manifest for Snort {conf.snort_version}")
-                    log.warning("Available versions: " + ", ".join(sorted(manifest_versions)))
-                else:
-                    version_to_use = best_match
-                    log.info(f"Using LightSPD version {version_to_use} for Snort {conf.snort_version}")
+				all_new_rules.extend(registered_rules)
+				all_new_policies.extend(registered_policies)
 
-                    # Get other data from manifest file for the selected version
-                    policies_path = manifest["snort versions"][version_to_use].get('policies_path', '')
-                    policies_path = policies_path.replace('/', sep)
-                    log.debug(f'policies_path from LightSPD Manifest: {policies_path}')
+			elif loaded_ruleset.ruleset == RulesetTypes.LIGHTSPD:
 
-                    # Check if architecture exists
-                    if conf.distro not in manifest["snort versions"][version_to_use].get('architectures', {}):
-                        log.warning(f'Architecture {conf.distro} not found for version {version_to_use}')
-                        log.warning(f'Available architectures: {list(manifest["snort versions"][version_to_use].get("architectures", {}).keys())}')
-                    else:
-                        modules_path = manifest["snort versions"][version_to_use]['architectures'][conf.distro]["modules_path"]
-                        modules_path = modules_path.replace('/', sep)
-                        log.debug(f'modules_path from LightSPD Manifest: {modules_path}')
+				lightspd_rules, lightspd_policies = process_lightspd_files(conf, ruleset_path)
 
-                        # Check if we should compile from source
-                        if conf.defined('compile_lightspd') and conf.compile_lightspd:
-                            log.info('Compiling SO rules from source with hybrid approach')
-                            precompiled_base = ruleset_path.joinpath('lightspd', modules_path, 'so_rules')
-                            lightspd_rules, lightspd_policies = compile_so_rules_hybrid(
-                                ruleset_path.joinpath('lightspd', 'modules', 'src'),
-                                precompiled_base,
-                                working_dir.so_rules_path
-                            )
-                        else:
-                            # Copy precompiled SO files
-                            so_src_folder = ruleset_path.joinpath('lightspd', modules_path, 'so_rules')
-                            if so_src_folder.exists():
-                                for file_name in so_src_folder.glob("*"):
-                                    if file_name.is_file():
-                                        full_file_name = so_src_folder.joinpath(file_name)
-                                        if full_file_name.is_file():
-                                            copy(full_file_name, working_dir.so_rules_path)
-                                            log.debug(f'Copied precompiled SO: {file_name}')
+				text_rules, text_policies = process_rules_files(conf, ruleset_path.joinpath('lightspd','rules'))
+				lightspd_rules.extend(text_rules)
+				lightspd_policies.extend(text_policies)
 
-                            # Load SO rule stubs
-                            so_rules_path = ruleset_path.joinpath('lightspd', 'modules', 'stubs')
-                            lightspd_rules = Rules(so_rules_path)
-                            lightspd_policies = Policies(so_rules_path)
+				builtin_rules, builtin_policies = process_lightspd_builtin_files(conf, ruleset_path.joinpath('lightspd', 'builtin'))
+				lightspd_rules.extend(builtin_rules)
+				lightspd_policies.extend(builtin_policies)
 
-                log.debug(f' - SO Rules processed:  {lightspd_rules}')
-                log.debug(f' - SO Policies processed:  {lightspd_policies}')
+				all_new_rules.extend(lightspd_rules)
+				all_new_policies.extend(lightspd_policies)
+				log.verbose(f'Preparing to apply policy {conf.ips_policy} to LightSPD rules')
+				log.debug(f' - LightSPD rules before policy application:  {lightspd_rules}')
 
-            elif conf.defined('sorule_path'):
-                log.debug('Trying to compile .so rules (no distro specified)')
-                lightspd_rules, lightspd_policies = compile_so_rules(ruleset_path.joinpath('lightspd', 'modules', 'src'), working_dir.so_rules_path)
+				# apply the policy to these rules
+				lightspd_rules.apply_policy(lightspd_policies[conf.ips_policy])
 
-            else:
-                log.debug('No so rules to process.')
+				log.verbose('Finished processing LightSPD ruleset')
+				log.verbose(f' - LightSPD Rules:  {lightspd_rules}')
+				log.verbose(f' - LightSPD Policies:  {lightspd_policies}')
 
-            # LOAD TEXT RULES FROM LightSPD archive
-            # right now, the LightSPD archive only has a 3.0.0.0 folder in it, so let's use that explicitly.
-            # this should hopefully be changed to an explicit entry in the manifest.json file
-            text_rules_path = ruleset_path.joinpath('lightspd', 'rules')
-            text_rules_versions = text_rules_path.iterdir()
-            snort_version_tuple = version_to_tuple(conf.snort_version)
-            for text_rules_version in text_rules_versions:
-                text_rule_version_tuple = version_to_tuple(text_rules_version.name)
-                if text_rule_version_tuple <= snort_version_tuple:
-
-                    lightspd_text_rules = Rules(text_rules_path.joinpath(text_rules_version), conf.ignored_files)
-                    lightspd_text_policies = Policies(text_rules_path.joinpath(text_rules_version))
-
-                    log.debug(f' - text Rules processed:  {lightspd_text_rules}')
-                    log.debug(f' - text Policies processed:  {lightspd_text_policies}')
-
-                    lightspd_rules.extend(lightspd_text_rules)
-                    lightspd_policies.extend(lightspd_text_policies)
-
-            # LOAD BULTIN RULES FROM LightSPD archive
-            # right now, the LightSPD folder has a single 3.0.0.0-0 folder in it, so let's use that explictly
-            # hopefully this will be changed to an explicit entry in the manifest.json file
-            builtin_rules_path = ruleset_path.joinpath('lightspd', 'builtins')
-            builtin_rules_versions = builtin_rules_path.iterdir()
-
-            for builtin_rules_version in builtin_rules_versions:
-                builtin_rules_version_tuple = version_to_tuple(builtin_rules_version.name)
-                if builtin_rules_version_tuple <= snort_version_tuple:
-                    lightspd_builtin_rules = Rules(builtin_rules_path.joinpath(builtin_rules_version), conf.ignored_files)
-                    lightspd_builtin_policies = Policies(builtin_rules_path.joinpath(builtin_rules_version))
-
-                    log.debug(f' - builtin Rules processed:  {lightspd_builtin_rules}')
-                    log.debug(f' - builtin Policies processed:  {lightspd_builtin_policies}')
-
-                    lightspd_rules.extend(lightspd_builtin_rules)
-                    lightspd_policies.extend(lightspd_builtin_policies)
-
-            log.verbose(f'Preparing to apply policy {conf.ips_policy} to LightSPD rules')
-            log.debug(f' - LightSPD rules before policy application:  {lightspd_rules}')
-
-            # apply the policy to these rules
-            lightspd_rules.apply_policy(lightspd_policies[conf.ips_policy])
-
-            log.verbose('Finished processing LightSPD ruleset')
-            log.verbose(f' - LightSPD Rules:  {lightspd_rules}')
-            log.verbose(f' - LightSPD Policies:  {lightspd_policies}')
-
-            all_new_rules.extend(lightspd_rules)
-            all_new_policies.extend(lightspd_policies)
-
-        else:
-            log.warning("Unknown ruleset archive folder recieved.")
-            # TODO: non-standard ruleset, we need to figure it out
+			else:
+				log.warning("Unknown ruleset archive folder recieved.")
+				# TODO: non-standard ruleset, we need to figure it out
 
     if len(conf.local_rules):
 
@@ -589,6 +509,183 @@ def main():
     # -----------------------------------------------------------------------------
     # Download Blocklists
 
+	donload_blocklists(conf)
+    # -----------------------------------------------------------------------------
+    # Relad Snort
+
+	reload_snort(conf)
+    # Delete the working dir (if requested)
+    del working_dir
+
+    # -----------------------------------------------------------------------------
+    # END Program Execution (main function)
+    log.info('Program execution complete.')
+
+# *****************************************************************************
+# *****************************************************************************
+#
+#
+#                       END OF MAIN FUNCTION
+#
+#
+# *****************************************************************************
+# *****************************************************************************
+def merge_rules_path(conf, ruleset_path):
+
+	rules_versions = ruleset_path.iterdir()
+	snort_version_tuple = version_to_tuple(conf.snort_version)
+
+	for rules_version in rules_versions:
+		rules_version_tuple = version_to_tuple(rules_version.name)
+		if snort_version_tuple >= rules_version_tuple:
+
+			update_rules = Rules(ruleset_path.joinpath(rules_version), conf.ignored_files, track_files=True)
+
+			# Apply SID modifications before updating
+			for s in conf.state_order:
+				if s == 'enable' and conf.defined('enablesid'):
+					update_rules.load_sid_modification_file(conf.enablesid, 'enable')
+				elif s == 'drop' and conf.defined('dropsid'):
+					update_rules.load_sid_modification_file(conf.dropsid, 'drop')
+				elif s == 'disable' and conf.defined('disablesid'):
+					update_rules.load_sid_modification_file(conf.disablesid, 'disable')
+
+			# Update local files
+			stats = update_rules.update_local_files(
+				conf.local_rules_folder,
+				backup=not conf.defined('no_backup') or not conf.no_backup,
+				dry_run=conf.dry_run
+			)
+
+			# Merge stats
+			for file, file_stats in stats.items():
+				if file not in total_stats:
+					total_stats[file] = {'updates': 0, 'additions': 0}
+				total_stats[file]['updates'] += file_stats['updates']
+				total_stats[file]['additions'] += file_stats['additions']
+
+
+def process_rules_files(conf, ruleset_path):
+
+	rules_versions = ruleset_path.iterdir()
+	snort_version_tuple = version_to_tuple(conf.snort_version)
+	rules = Rules()
+	policies = Policies()
+	for rules_version in rules_versions:
+		rule_version_tuple = version_to_tuple(rules_version.name)
+		if rule_version_tuple <= snort_version_tuple:
+
+			rule = Rules(rules_path.joinpath(rules_version), conf.ignored_files)
+			policy = Policies(rules_path.joinpath(rules_version))
+
+			log.debug(f' - Rules processed:  {rules}')
+			log.debug(f' - Policies processed:  {policies}')
+
+			rules.extend(rule)
+			policies.extend(policy)
+	return rules, policy
+
+
+
+def process_lightspd_files(conf, ruleset_path):
+	log.info('Processing LightSPD ruleset')
+	log.verbose(f' - Ruleset path:  {ruleset_path}')
+
+	lightspd_rules = Rules()
+	lightspd_policies = Policies()
+
+	# load .so rules IFF sorule_path is configured.
+	# if 'distro' is not configured, then we need to compile the rules ourself
+	# right now: we only use the manifest.json file for processing .so rules
+	if conf.defined('sorule_path') and conf.defined('distro'):
+		log.debug('Trying to load precompiled so rules')
+		json_manifest_file = ruleset_path.joinpath('lightspd','manifest.json')
+
+		# load json manifest file to identify .so rules location
+		log.debug(f"Processing json manifest file {json_manifest_file}")
+		with open(json_manifest_file) as f:
+			manifest = load(f)
+
+		# Get all available versions from manifest
+		manifest_versions = list(manifest["snort versions"].keys())
+		log.debug(f'Found {len(manifest_versions)} versions in manifest: {manifest_versions}')
+
+		# Convert our Snort version to tuple
+		snort_version_tuple = version_to_tuple(conf.snort_version)
+		log.debug(f'Snort version {conf.snort_version} converted to tuple: {snort_version_tuple}')
+
+		# Find the best matching version (highest version <= our Snort version)
+		best_match = None
+		best_match_tuple = (0, 0, 0, 0, 0)
+
+		for manifest_version in manifest_versions:
+			manifest_tuple = version_to_tuple(manifest_version)
+			log.debug(f'Checking manifest version {manifest_version} (tuple: {manifest_tuple})')
+
+			# Check if this version is <= our Snort version and better than current best
+			if manifest_tuple <= snort_version_tuple and manifest_tuple > best_match_tuple:
+				best_match = manifest_version
+				best_match_tuple = manifest_tuple
+				log.debug(f'  -> New best match: {best_match}')
+
+		if best_match is None:
+			log.warning(f"No compatible version found in LightSPD manifest for Snort {conf.snort_version}")
+			log.warning("Available versions: " + ", ".join(sorted(manifest_versions)))
+		else:
+			version_to_use = best_match
+			log.info(f"Using LightSPD version {version_to_use} for Snort {conf.snort_version}")
+
+			# Get other data from manifest file for the selected version
+			policies_path = manifest["snort versions"][version_to_use].get('policies_path', '')
+			policies_path = policies_path.replace('/', sep)
+			log.debug(f'policies_path from LightSPD Manifest: {policies_path}')
+
+			# Check if architecture exists
+			if conf.distro not in manifest["snort versions"][version_to_use].get('architectures', {}):
+				log.warning(f'Architecture {conf.distro} not found for version {version_to_use}')
+				log.warning(f'Available architectures: {list(manifest["snort versions"][version_to_use].get("architectures", {}).keys())}')
+			else:
+				modules_path = manifest["snort versions"][version_to_use]['architectures'][conf.distro]["modules_path"]
+				modules_path = modules_path.replace('/', sep)
+				log.debug(f'modules_path from LightSPD Manifest: {modules_path}')
+
+				# Check if we should compile from source
+				if conf.defined('compile_lightspd') and conf.compile_lightspd:
+					log.info('Compiling SO rules from source with hybrid approach')
+					precompiled_base = ruleset_path.joinpath('lightspd', modules_path, 'so_rules')
+					lightspd_rules, lightspd_policies = compile_so_rules_hybrid(
+						ruleset_path.joinpath('lightspd', 'modules', 'src'),
+						precompiled_base,
+						working_dir.so_rules_path
+					)
+				else:
+					# Copy precompiled SO files
+					so_src_folder = ruleset_path.joinpath('lightspd', modules_path, 'so_rules')
+					if so_src_folder.exists():
+						for file_name in so_src_folder.glob("*"):
+							if file_name.is_file():
+								full_file_name = so_src_folder.joinpath(file_name)
+								if full_file_name.is_file():
+									copy(full_file_name, working_dir.so_rules_path)
+									log.debug(f'Copied precompiled SO: {file_name}')
+
+					# Load SO rule stubs
+					so_rules_path = ruleset_path.joinpath('lightspd', 'modules', 'stubs')
+					lightspd_rules = Rules(so_rules_path)
+					lightspd_policies = Policies(so_rules_path)
+
+		log.debug(f' - SO Rules processed:  {lightspd_rules}')
+		log.debug(f' - SO Policies processed:  {lightspd_policies}')
+
+	elif conf.defined('sorule_path'):
+		log.debug('Trying to compile .so rules (no distro specified)')
+		lightspd_rules, lightspd_policies = compile_so_rules(ruleset_path.joinpath('lightspd', 'modules', 'src'), working_dir.so_rules_path)
+
+	else:
+		log.debug('No so rules to process.')
+	return lightspd_rules, lightspd_policies
+
+def download_blocklists(conf):
     # Have a blocklist out file defined AND have a blocklist to download?
     if conf.defined('blocklist_path') and any([conf.snort_blocklist, conf.et_blocklist, len(conf.blocklist_urls)]):
 
@@ -639,9 +736,8 @@ def main():
         except Exception as e:
             log.warning(f'Unable to write blocklist:  {e}')
 
-    # -----------------------------------------------------------------------------
-    # Relad Snort
 
+def reload_snort(conf):
     # Have a PID file defined?
     if conf.defined('pid_path'):
         log.verbose(f'Loading Snort PID file: {conf.pid_path}')
@@ -666,24 +762,6 @@ def main():
         # ucrtbase = ctypes.CDLL('ucrtbase')
         # c_raise = ucrtbase['raise']
         # c_raise(some_signal)
-
-    # Delete the working dir (if requested)
-    del working_dir
-
-    # -----------------------------------------------------------------------------
-    # END Program Execution (main function)
-    log.info('Program execution complete.')
-
-# *****************************************************************************
-# *****************************************************************************
-#
-#
-#                       END OF MAIN FUNCTION
-#
-#
-# *****************************************************************************
-# *****************************************************************************
-
 
 def flying_pig_banner():
     '''
