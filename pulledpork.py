@@ -279,6 +279,15 @@ def update_mode(conf, loaded_rulesets, working_dir):
                 conf, conf.local_rules_folder, ruleset_path.joinpath("rules")
             )
 
+        elif loaded_ruleset.ruleset == RulesetTypes.EMERGING_THREATS:
+
+            log.info("Processing Emerging Threats ruleset for updates")
+            merge_rules_path(
+                conf, conf.local_rules_folder, ruleset_path.joinpath("rules")
+            )
+
+
+
         elif loaded_ruleset.ruleset == RulesetTypes.LIGHTSPD:
             # Similar processing for LightSPD if needed
             log.info("Processing LightSPD ruleset for updates")
@@ -300,6 +309,9 @@ def update_mode(conf, loaded_rulesets, working_dir):
         elif loaded_ruleset.ruleset == RulesetTypes.COMMUNITY:
             log.info("Processing Community ruleset for updates")
             # ... similar logic
+            community_rules, _ = process_rules_files(
+                conf, ruleset_path.joinpath('rules')
+            )
 
     # Summary
     log.info("Update Summary:")
