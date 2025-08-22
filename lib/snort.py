@@ -23,16 +23,16 @@ __all__ = [
 ]
 
 
-################################################################################
+###############################################################################
 # Logging
-################################################################################
+###############################################################################
 
 log = logger.Logger()
 
 
-################################################################################
+###############################################################################
 # Constants
-################################################################################
+###############################################################################
 
 # Rule regex patterns
 RULE_REGEX = re.compile(r"^(#\s*)?(\w+)\s(.*\(.+sid:(\d+);.+\))\s*$")
@@ -60,10 +60,19 @@ RULESET_LIGHTSPD_FILE_CHECKS = [
     "lightspd/policies/common/",
 ]
 
+RULESET_EMERGING_FILE_CHECKS = [
+    "rules/LICENSE",
+    "rules/emerging-activex.rules",
+    "rules/classification.config",
+    "rules/sid-msg.map",
+    "rules/threatview_CS_c2.rules",
+]
 
-################################################################################
+RULESET_EMERGING_PRO_FILE_CHECKS = [
+]
+###############################################################################
 # Enums
-################################################################################
+###############################################################################
 
 
 # Rulesets enum
@@ -71,12 +80,13 @@ class RulesetTypes(Enum):
     COMMUNITY = "Community Ruleset"  # noqa
     REGISTERED = "Registered Ruleset"
     LIGHTSPD = "LightSPD Ruleset"  # noqa
+    EMERGING_THREATS = "Emerging Threats Ruleset"  # noqa
     UNKNOWN = "Unknown Ruleset"  # noqa
 
 
-################################################################################
+###############################################################################
 # Blocklist - Helps with the management of blocklists
-################################################################################
+###############################################################################
 
 
 class Blocklist:
@@ -509,8 +519,7 @@ class Rules:
             local_file = local_rules_folder / source_file.name
 
             if not local_file.exists():
-                log.verbose(f"No matching local file for {source_file.name}")
-                continue
+                local_file.touch()
 
             log.info(f"Processing local file: {local_file.name}")
 
@@ -548,7 +557,8 @@ class Rules:
                                     "original_line": line,
                                 }
                         except Exception as e:
-                            log.debug(f"Error parsing rule at line {line_num}: {e}")
+                            log.debug("Error parsing rule at line"
+                                      f" {line_num}: {e}")
 
             # Track updates
             updates = 0
@@ -570,7 +580,8 @@ class Rules:
                         line_idx = local_rules[rule_id]["line_num"]
                         local_lines[line_idx] = new_rule.stateful_text + "\n"
                         updates += 1
-                        log.debug(f"  Updated {rule_id}: rev {local_rev} -> {new_rev}")
+                        log.debug(f"  Updated {rule_id}: "
+                                  f"rev {local_rev} -> {new_rev}")
                 else:
                     # New rule - append to file
                     local_lines.append(new_rule.stateful_text + "\n")
@@ -581,7 +592,8 @@ class Rules:
             if updates > 0 or additions > 0:
                 if dry_run:
                     log.info(
-                        f"  [DRY RUN] Would update {local_file.name}: {updates} updates, {additions} additions"
+                        f"  [DRY RUN] Would update {local_file.name}: "
+                        f"{updates} updates, {additions} additions"
                     )
                 else:
                     # Backup original
@@ -595,7 +607,8 @@ class Rules:
                         f.writelines(local_lines)
 
                     log.info(
-                        f"  Updated {local_file.name}: {updates} updates, {additions} additions"
+                        f"  Updated {local_file.name}: {updates} updates,"
+                        f" {additions} additions"
                     )
 
                 update_stats[str(local_file)] = {
@@ -615,8 +628,7 @@ class Rules:
         for rule in self._all_rules.values():
             if rule.state:
                 enabled += 1
-
-        return f"Rules(loaded:{total}, enabled:{enabled}, disabled:{total - enabled})"
+        return f"Rules(t:{total}, en:{enabled}, d:{total - enabled})"
 
     def __len__(self):
         """
@@ -709,68 +721,6 @@ class Rules:
             res = self._all_rules[rule_id]
         return res
 
-    def load_file(self, rules_file):
-        """
-        Load a rules file
-
-        Example:
-        >>> txt = Rules()
-        >>> txt
-        Rules(loaded:0, enabled:0, disabled:0)
-        >>>
-        >>> txt.load_file('../rules/snort3-netbios.rules')
-        >>> txt
-        Rules(loaded:244, enabled:244, disabled:0)
-        """
-        rules_file = Path(rules_file)
-
-        # We'll use a copy
-        metadata = self.metadata.copy()
-
-        # Work through the policy file
-        with rules_file.open("r") as fh:
-
-            # Save the filename bits to the metadata
-            metadata["file_path"] = rules_file
-            metadata["file_name"] = rules_file.name
-
-            for line_num, line in enumerate(fh.readlines(), 1):
-
-                # Strip the line
-                line = line.strip()
-
-                # Skip when we hit obvious non-rules (or pulled ones)
-                if not line:
-                    continue
-                elif "sid:" not in line:
-                    continue
-                elif "(" not in line and ")" not in line:
-                    continue
-                elif line.startswith("###### PULLED BY "):
-                    continue
-
-                # Attempt to parse the line as a rule
-                try:
-                    new_rule = Rule(line, **metadata)
-                except ValueError as e:
-                    log.verbose(f"{rules_file}:{line_num} - {e}")
-                    continue
-
-                # If the rule is already present, we want to keep
-                # the one with the higher rev
-                if new_rule.rule_id in self._all_rules:
-                    current_rule = self[new_rule.rule_id]
-
-                    # If the current rule has a later or same rev, move on
-                    if current_rule.rev >= new_rule.rev:
-                        log.verbose(
-                            f"{rules_file}:{line_num} - Duplicate rule_id with same/earlier rev; skipping"
-                        )
-                        continue
-
-                # Save the rule to cache
-                self._all_rules[new_rule.rule_id] = new_rule
-
     def write_file(self, rules_file, include_disabled=False, header=None):
         """
         Write the rules to a file
@@ -799,7 +749,9 @@ class Rules:
                 if rule.state:
                     fh.write(f"{rule.text}\n")
 
-                # Else iif the rule is disabled AND we're including the writing of them...
+                # Else iif the rule is disabled
+                # AND we're including the
+                # writing of them...
                 elif not rule.state and include_disabled:
                     fh.write(f"# {rule.text}\n")
 
@@ -910,7 +862,9 @@ class Rules:
 
         # Ensure we have something to modify
         if state is None and action is None:
-            raise ValueError("No rule modifications to make; state or action required")
+            raise ValueError("No rule modifications"
+                             " to make; state or "
+                             "action required")
 
         # If rule_ids is a string, make it a list
         if isinstance(rule_ids, str):
@@ -973,13 +927,16 @@ class Rules:
 
         # Ensure we have something to modify
         if state is None and action is None:
-            raise ValueError("No rule modifications to make; state or action required")
+            raise ValueError("No rule modifications "
+                             "to make; state or "
+                             "action required")
 
         # If it's a string, compile it
         if isinstance(regex_pattern, str):
             regex_pattern = re.compile(regex_pattern)
         elif not isinstance(regex_pattern, re.Pattern):
-            raise ValueError("Provided regex pattern must be a str or re.Pattern")
+            raise ValueError("Provided regex pattern "
+                             "must be a str or re.Pattern")
 
         # Work through the rules
         for rule in self._all_rules.values():
@@ -1024,7 +981,9 @@ class Rules:
 
                 # If the current rule has a later or same rev, move on
                 if current_rule.rev >= new_rule.rev:
-                    log.verbose("Duplicate rule_id with same/earlier rev; skipping")
+                    log.verbose("Duplicate rule_id "
+                                "with same/earlier "
+                                "rev; skipping")
                     continue
 
             # Save the rule to cache
@@ -1065,17 +1024,23 @@ class Rules:
         if isinstance(sid_file, str):
             sid_file = Path(sid_file)
 
-        log.debug(f"- `{type}`: Changing rules by SID, input filename is {sid_file}")
+        log.debug(f"- `{type}`: Changing "
+                  "rules by SID, input "
+                  f"filename is {sid_file}")
 
         # make sure we have a sid_file and the type
         if type not in ["enable", "disable", "drop"]:
             raise ValueError(
-                "Invalid `Type` provided to function load_sid_modification_file"
+                "Invalid `Type` "
+                "provided to function "
+                "load_sid_modification_file"
             )
 
         if sid_file is None:
             raise ValueError(
-                "No `sid_value` provided to function load_sid_modification_file"
+                "No `sid_value` provided "
+                "to function "
+                "load_sid_modification_file"
             )
 
         # what are we doing?
@@ -1108,58 +1073,58 @@ class Rules:
                 # break the line into sid patterns by comma
                 sid_patterns = line.split(",")
 
-                log.debug(
-                    f'- Line {line_num} has sid pattern: {line}, made up of {len(sid_patterns)} items: {"; ".join(sid_patterns)} '
-                )
-
                 for pattern in sid_patterns:
                     pattern = pattern.strip()
 
-                    log.debug(f"\t- checking sid pattern: {pattern}")
-
                     if re.search(r"^MS\d{2}-", pattern):
-                        # ex: reference:url,technet.microsoft.com/en-us/security/bulletin/ms07-062;
                         self.modify_by_regex(
-                            f"reference:url,technet.microsoft.com/en-us/security/bulletin/{pattern};",
+                            "reference:url,technet.microsoft.com"
+                            f"/en-us/security/bulletin/{pattern};",
                             state,
                             action,
                         )
                     elif pattern.startswith("cve:"):
                         # ex: reference:cve,2008-1447;
                         pattern = pattern.replace(":", ",", 1)
-                        self.modify_by_regex(f"reference:{pattern};", state, action)
+                        self.modify_by_regex(f"reference:{pattern};",
+                                             state,
+                                             action)
                     elif pattern.startswith("bugtraq:"):
-                        # example from rules file: reference:bugtraq,12960;
                         pattern = pattern.replace(":", ",", 1)
-                        self.modify_by_regex(f"reference:{pattern};", state, action)
+                        self.modify_by_regex(f"reference:{pattern};",
+                                             state,
+                                             action)
                     elif pattern.startswith("pcre:"):
-                        # example: MS(0[7-9]|10)-\d+
                         self.modify_by_regex(f"{pattern[5:]};", state, action)
                     elif re.search(r"^\d+:\d+$", pattern):
-                        # exact GID:SID match (easy)
                         self.modify(pattern, state, action)
                     elif re.search(r"^\d+:\d+-\d+:\d+$", pattern):
-                        # SID range...not sure how to do this yet (TODO)
                         self.modify(pattern, state, action)
                     elif pattern.startswith("VRT-"):
-                        # TODO
-                        log.warning("sid processing not implemented yet for categories")
+                        log.warning("sid processing "
+                                    "not implemented"
+                                    " yet for categories")
                     elif pattern.startswith("ET-"):
-                        # TODO
-                        log.warning("sid processing not implemented yet for categories")
+                        log.warning("sid processing"
+                                    " not implemented"
+                                    " yet for categories")
                     elif pattern.startswith("Custom-"):
-                        # TODO
-                        log.warning("sid processing not implemented yet for categories")
+                        log.warning("sid processing "
+                                    "not implemented"
+                                    " yet for "
+                                    "categories")
                     else:
                         # unknown
                         log.warning(
-                            f"Unknown option, line {line_num} in {sid_file}: {pattern} "
+                            "Unknown option, line "
+                            f"{line_num} in "
+                            f"{sid_file}: {pattern}"
                         )
 
 
-################################################################################
+#####################################################
 # Policy - A Rule policy
-################################################################################
+#####################################################
 
 
 class Policy:
@@ -1245,7 +1210,11 @@ class Policy:
         rule_id = f"{gid}:{sid}"
 
         # Save the rule to the dict
-        self.rules[rule_id] = {"gid": gid, "sid": sid, "action": action, "state": state}
+        self.rules[rule_id] = {"gid": gid,
+                               "sid": sid,
+                               "action": action,
+                               "state": state
+                               }
 
     def load_file(self, policy_file):
         """
@@ -1322,7 +1291,8 @@ class Policy:
         >>> pol = Policy('custom')
         >>> pol
         Policy(name:custom, rules:0)
-        >>> pol2 = Policy('balanced', '../rules/rulestates-balanced-ips.states')
+        >>> pol2 = Policy('balanced',
+                          '../rules/rulestates-balanced-ips.states')
         >>> pol2
         Policy(name:balanced, rules:8579)
         >>>
@@ -1333,7 +1303,8 @@ class Policy:
 
         # Wut?
         if not isinstance(other_policy, Policy):
-            raise ValueError(f"Not a recognized Policy object:  {other_policy}")
+            raise ValueError("Not a recognized "
+                             f"Policy object:  {other_policy}")
 
         # Update the rules in this policy from the other
         self.rules.update(other_policy.rules)
@@ -1359,13 +1330,15 @@ class Policy:
 
                 # Write the policy line
                 fh.write(
-                    f'{rule["action"]} (gid:{rule["gid"]}; sid:{rule["sid"]}; enable)\n'
+                    f"{rule["action"]} "
+                    f"(gid:{rule["gid"]}; "
+                    f"sid:{rule["sid"]}; enable)\n"
                 )
 
 
-################################################################################
+###############################################################################
 # Policies - A collection of Policy objects
-################################################################################
+###############################################################################
 
 
 class Policies:
@@ -1392,7 +1365,11 @@ class Policies:
         >>>
         >>> pols = Policies('../rules')
         >>> pols
-        Policies(loaded:5, names:[max-detect, balanced, security, connectivity, none])
+        Policies(loaded:5, names:[max-detect,
+                                  balanced,
+                                  security,
+                                  connectivity,
+                                  none])
         """
 
         # Setup the policy cache
@@ -1437,7 +1414,9 @@ class Policies:
             raise FileNotFoundError(rules_path)
 
     def __repr__(self):
-        return f'Policies(loaded:{len(self._policies)}, names:[{", ".join(self._policies.keys())}])'
+        return "Policies(loaded:" \
+               f"{len(self._policies)}, " \
+               f"names:[{', '.join(self._policies.keys())}])"
 
     def __len__(self):
         """
@@ -1446,7 +1425,11 @@ class Policies:
         Example:
         >>> pols = Policies('../rules')
         >>> pols
-        Policies(loaded:5, names:[max-detect, balanced, security, connectivity, none])
+        Policies(loaded:5, names:[max-detect,
+                                  balanced,
+                                  security,
+                                  connectivity,
+                                  none])
         >>>
         >>> len(pols)
         5
@@ -1461,7 +1444,11 @@ class Policies:
 
         >>> pols = Policies('../rules')
         >>> pols
-        Policies(loaded:5, names:[max-detect, balanced, security, connectivity, none])
+        Policies(loaded:5, names:[max-detect,
+                                  balanced,
+                                  security,
+                                  connectivity,
+                                  none])
         >>>
         >>> for pol in pols:
         ...     pol
@@ -1481,7 +1468,11 @@ class Policies:
         Example:
         >>> pols = Policies('../rules')
         >>> pols
-        Policies(loaded:5, names:[max-detect, balanced, security, connectivity, none])
+        Policies(loaded:5, names:[max-detect,
+                                  balanced,
+                                  security,
+                                  connectivity,
+                                  none])
         >>>
         >>> 'balanced' in pols
         True
@@ -1495,7 +1486,11 @@ class Policies:
         Example:
         >>> pols = Policies('../rules')
         >>> pols
-        Policies(loaded:5, names:[max-detect, balanced, security, connectivity, none])
+        Policies(loaded:5, names:[max-detect,
+                                  balanced,
+                                  security,
+                                  connectivity,
+                                  none])
         >>>
         >>> pols['balanced']
         Policy(name:balanced, rules:8579)
@@ -1509,7 +1504,11 @@ class Policies:
         Example:
         >>> pols = Policies('../rules')
         >>> pols
-        Policies(loaded:5, names:[max-detect, balanced, security, connectivity, none])
+        Policies(loaded:5, names:[max-detect,
+                                  balanced,
+                                  security,
+                                  connectivity,
+                                  none])
         >>>
         >>> pols.get('xxx', 'nope')
         'nope'
@@ -1530,11 +1529,19 @@ class Policies:
         Example:
         >>> pols = Policies('../rules')
         >>> pols
-        Policies(loaded:5, names:[max-detect, balanced, security, connectivity, none])
+        Policies(loaded:5, names:[max-detect,
+                                  balanced,
+                                  security,
+                                  connectivity,
+                                  none])
         >>>
         >>> new = pols.copy()
         >>> new
-        Policies(loaded:5, names:[max-detect, balanced, security, connectivity, none])
+        Policies(loaded:5, names:[max-detect,
+                                  balanced,
+                                  security,
+                                  connectivity,
+                                  none])
         """
 
         # Setup our new instance
@@ -1547,9 +1554,10 @@ class Policies:
         # Return the new Rules object
         return new_policies
 
-    def extend(self, other_thing):
+    def extend(self, oth):
         """
-        Extend the current Policies object to include another Policy or Policies object
+        Extend the current Policies object to
+        include another Policy or Policies object
 
         Example:
         >>> pols = Policies()
@@ -1557,18 +1565,26 @@ class Policies:
         Policies(loaded:0, names:[])
         >>> pols2 = Policies('../rules')
         >>> pols2
-        Policies(loaded:5, names:[max-detect, balanced, security, connectivity, none])
+        Policies(loaded:5, names:[max-detect,
+                                  balanced,
+                                  security,
+                                  connectivity,
+                                  none])
         >>>
         >>> pols.extend(pols2)
         >>> pols
-        Policies(loaded:5, names:[max-detect, balanced, security, connectivity, none])
+        Policies(loaded:5, names:[max-detect,
+                                  balanced,
+                                  security,
+                                  connectivity,
+                                  none])
         """
 
         # If it's a Policies object we'll work to combine them
-        if isinstance(other_thing, Policies):
+        if isinstance(oth, Policies):
 
             # Work through the policies
-            for policy_name, policy in other_thing._policies.items():
+            for policy_name, policy in oth._policies.items():
 
                 # If we don't have the policy, add it
                 if policy_name not in self._policies:
@@ -1579,26 +1595,25 @@ class Policies:
                     self._policies[policy_name].rules.update(policy.rules)
 
         # If it's a policy object we'll add it, or extend it if it exists
-        elif isinstance(other_thing, Policy):
+        elif isinstance(oth, Policy):
 
             # If we have a policy by that name, update the policy
-            if other_thing.name in self._policies:
-                self._policies[other_thing.name].rules.update(other_thing.rules)
+            if oth.name in self._policies:
+                self._policies[oth.name].rules.update(oth.rules)
 
             # Doesn't exist, add it
             else:
-                self._policies[other_thing.name] = other_thing
+                self._policies[oth.name] = oth
 
-        # Wut?
         else:
             raise ValueError(
-                f"Not a recognized Policy or Polcies object:  {other_thing}"
+                f"Not a recognized Policy or Polcies object:  {oth}"
             )
 
 
-################################################################################
+###############################################################################
 # RulesArchive - Helper for loads, saving, and extracting rules archives
-################################################################################
+###############################################################################
 
 
 class RulesArchive:
@@ -1612,7 +1627,8 @@ class RulesArchive:
 
         # Validate only one set
         if filename and url:
-            raise ValueError("Only one -- `filename` or `url` -- may be used at once")
+            raise ValueError("Only one -- `filename` or `url` "
+                             "-- may be used at once")
 
         # Setup the archive
         self._data = None
@@ -1629,6 +1645,13 @@ class RulesArchive:
 
     def __repr__(self):
         return f"RulesArchive(ruleset:{self.ruleset})"
+
+    def __bool__(self):
+        if (self._ruleset != RulesetTypes.UNKNOWN):
+            return True
+        elif self._data:
+            return True
+        return False
 
     @property
     def md5(self):
@@ -1664,6 +1687,8 @@ class RulesArchive:
                 self._ruleset = RulesetTypes.REGISTERED
             elif self.filename == "Talos_LightSPD.tar.gz":
                 self._ruleset = RulesetTypes.LIGHTSPD
+            elif self.filename == "emerging.rules.tar.gz":
+                self._ruleset = RulesetTypes.EMERGING_THREATS
 
             # Need the ruleset to be loaded to perform additional checks
             elif not self._data:
@@ -1678,12 +1703,18 @@ class RulesArchive:
                     filenames = fh.getnames()
 
                     # These checks kinda suck, but...
-                    if all(x in filenames for x in RULESET_COMMUNITY_FILE_CHECKS):
+                    if all(x in filenames for x in
+                           RULESET_COMMUNITY_FILE_CHECKS):
                         self._ruleset = RulesetTypes.COMMUNITY
-                    elif all(x in filenames for x in RULESET_REGISTERED_FILE_CHECKS):
+                    elif all(x in filenames for x in
+                             RULESET_REGISTERED_FILE_CHECKS):
                         self._ruleset = RulesetTypes.REGISTERED
-                    elif all(x in filenames for x in RULESET_REGISTERED_FILE_CHECKS):
+                    elif all(x in filenames for x in
+                             RULESET_REGISTERED_FILE_CHECKS):
                         self._ruleset = RulesetTypes.LIGHTSPD
+                    elif all(x in filenames for x in
+                             RULESET_EMERGING_FILE_CHECKS):
+                        self._ruleset = RulesetTypes.EMERGING_THREATS
 
                     # Have no idea
                     else:
@@ -1843,16 +1874,13 @@ class SnortRuleParser:
         # Find all rule files
         rule_files = self.find_rule_files()
 
-        # Track which files we'll modify
-        files_to_modify = set()
-
         for rule in duplicate_rules:
             sid = rule["sid"]
             # Find all instances of this rule
             found_rules = self.find_duplicate_rules(sid, rule_files)
 
             if len(found_rules) < 2:
-                print(f"  ⚠ Expected multiple instances but found {len(found_rules)}")
+                print(f"Expected multi instances but found {len(found_rules)}")
                 continue
 
             # Sort by revision (highest first)
@@ -1861,13 +1889,6 @@ class SnortRuleParser:
             # Comment out older revisions
             for rule in found_rules[1:]:
                 if not rule["is_commented"]:
-                    file_name = os.path.basename(rule["file_path"])
-
-                    # Skip if it's pulledpork.rules (we don't want to modify that)
-                    if "pulledpork" in file_name.lower():
-                        print(
-                            f"    ⚠ Skipping pulledpork.rules - should be handled by pulledpork config"
-                        )
-                        continue
-
-                    self.comment_out_rule(rule["file_path"], rule["line_num"], dry_run)
+                    self.comment_out_rule(rule["file_path"],
+                                          rule["line_num"],
+                                          dry_run)

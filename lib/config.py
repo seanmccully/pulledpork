@@ -48,6 +48,7 @@ class Config:
         "community_ruleset": False,
         "registered_ruleset": False,
         "lightspd_ruleset": False,
+        "emergingthreats_ruleset": False,
         "snort_blocklist": False,
         "et_blocklist": False,
         "ips_policy": "connectivity",
@@ -298,25 +299,6 @@ class Config:
                 log.warning(
                     f'`rule_mode` is set to "simple", but `policy_path` is is set (but not used in "simple)"'
                 )
-
-        # Enabled more than one official ruleset?
-        num_enabled_rulesets = [
-            self.community_ruleset,
-            self.registered_ruleset,
-            self.lightspd_ruleset,
-        ].count(True)
-        if num_enabled_rulesets > 2:
-            log.warning(
-                "More than two official ruleset is selected; not recommended since there is a lot of overlap"
-            )
-
-        # Increment the enabled count if we have local rules enabled
-        if self.defined("local_rules"):
-            num_enabled_rulesets += 1
-
-        # No rulesets enabled?
-        if num_enabled_rulesets == 0:
-            log.error("No rulesets have been enabled; rule processing cannot continue")
 
         # Check for enabled rulesets that require an oinkcode
         if any([self.registered_ruleset, self.lightspd_ruleset]) and not self.defined(

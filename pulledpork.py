@@ -27,6 +27,7 @@ from pathlib import Path
 from platform import platform, version, uname, system, python_version, architecture
 from re import search, sub, match, MULTILINE
 from shutil import copy  # remove directory tree, python 3.4+
+from string import Template
 
 try:
     from signal import SIGHUP  # linux/bsd, not windows
@@ -66,8 +67,8 @@ RULESET_URL_SNORT_REGISTERED = (
 RULESET_URL_SNORT_LIGHTSPD = "https://snort.org/rules/Talos_LightSPD.tar.gz"
 
 # TODO: Support for the ET Rulesets has not yet been implemented
-# RULESET_URL_ET_OPEN = 'https://rules.emergingthreats.net/open/snort-<VERSION>/emerging.rules.tar.gz'
-# RULESET_URL_ET_PRO = 'https://rules.emergingthreatspro.com/<ET_OINKCODE>/snort-<VERSION>/etpro.rules.tar.gz'
+RULESET_URL_ET_OPEN = Template('https://rules.emergingthreats.net/open/snort-$version/emerging.rules.tar.gz')
+RULESET_URL_ET_PRO = Template('https://rules.emergingthreatspro.com/$oinkcode/snort-$version/etpro.rules.tar.gz')
 
 # URLs for supported blocklists
 SNORT_BLOCKLIST_URL = "https://snort.org/downloads/ip-block-list"
@@ -103,8 +104,103 @@ def version_to_tuple(version_str):
         result.append(0)
     return tuple(result)
 
+def load_ruleset(working_dir, filename=None, url=None, oinkcode=None):
+    """
+    Load the specified ruleset, locally or from URL, and add to the rulesets list
+    """
+
+    log.verbose(f"Loading rules archive:\n - Source:  {filename or url}")
+
+    # Attempt to load the file and get the type
+    try:
+        rules_archive = RulesArchive(filename=filename, url=url, oinkcode=oinkcode)
+        ruleset_type = rules_archive.ruleset
+    except Exception as e:
+        log.warning(f"Unable to load rules archive:  {e}")
+        return
+    log.verbose(f" - Loaded as:  {ruleset_type.value}")
+
+    # Save the ruleset
+    try:
+        written_file = rules_archive.write_file(working_dir.downloaded_path)
+    except Exception as e:
+        log.warning(f"Unable to save rules archive:  {e}")
+        return
+    log.verbose(f" - Saved as:  {written_file}")
+
+    # Appends the loaded ruleset
+    return rules_archive
+
+# End helper
+
 
 def main():
+    conf = load_conf()
+
+    target_dir = f"{SCRIPT_NAME}-{conf.start_time}"
+    working_dir = helpers.WorkingDirectory(
+        conf.temp_path, target_dir, conf.delete_temp_path
+    )
+    log.verbose(f"Working directory is:  {working_dir}")
+
+    # Are we missing the Snort version in config?
+    if not conf.defined("snort_version"):
+        conf.snort_version = get_snort_version(conf.get("snort_path"))
+
+    # we now have all required info to run, print the configuration to screen
+    print_operational_settings()
+
+
+    log.debug("---------------------------------")
+    log.verbose("Loading rulesets")
+
+    # The RulesArchive objects used for loading
+    loaded_rulesets = []
+    if conf.args.file:
+        loaded_rulesets.append(load_ruleset(working_dir, filename=conf.args.file))
+
+    if conf.args.folder:
+        folder = Path(conf.args.folder)
+        if folder.exists() and folder.is_dir():
+            for path in folder.iterdir():
+                full_path = folder.joinpath(path)
+                if full_path.is_file():
+                    loaded_rulesets.append(load_ruleset(working_dir, filename=full_path))
+
+
+    loaded_rulesets.extend(load_rulesets_extract(conf, working_dir))
+
+    log.debug("---------------------------------")
+    log.verbose("Processing rulesets")
+
+    # Check if we're in update mode
+    if (
+        conf.defined("update_mode")
+        and conf.update_mode == "update"
+        and conf.defined("local_rules_folder")
+    ):
+        update_mode(conf, loaded_rulesets, working_dir)
+
+    else:
+        # Original merge mode processing
+        log.info("Running in MERGE mode - will create single rules file")
+        log.debug("---------------------------------")
+        log.verbose("Processing rulesets")
+
+        pulled_pork_file_processing(conf, loaded_rulesets, working_dir)
+
+
+# *****************************************************************************
+# *****************************************************************************
+#
+#
+#                       END OF MAIN FUNCTION
+#
+#
+# *****************************************************************************
+# *****************************************************************************
+
+def load_conf():
 
     # parse our command-line args with ArgParse
     conf.args = parse_argv()
@@ -165,184 +261,116 @@ def main():
 
     # Attempt to validate the config
     conf.validate()
+    return conf
 
-    target_dir = f"{SCRIPT_NAME}-{conf.start_time}"
-    working_dir = helpers.WorkingDirectory(
-        conf.temp_path, target_dir, conf.delete_temp_path
-    )
-    log.verbose(f"Working directory is:  {working_dir}")
 
-    # Are we missing the Snort version in config?
-    if not conf.defined("snort_version"):
-        conf.snort_version = get_snort_version(conf.get("snort_path"))
+def update_mode(conf, loaded_rulesets, working_dir):
+    log.info("Running in UPDATE mode - will update individual rule files")
 
-    # we now have all required info to run, print the configuration to screen
-    print_operational_settings()
+    # Process each ruleset separately for update mode
+    for loaded_ruleset in loaded_rulesets:
+        ruleset_path = loaded_ruleset.extracted_path
 
-    # -----------------------------------------------------------------------------
-    # LOAD RULESETS
-    # Obtain the archived ruleset (tgz) files
-    # either from online sources or from a local folder
+        if loaded_ruleset.ruleset == RulesetTypes.REGISTERED:
+            log.info("Processing Registered ruleset for updates")
 
-    log.debug("---------------------------------")
-    log.verbose("Loading rulesets")
+            # Load rules with file tracking
+            merge_rules_path(
+                conf, conf.local_rules_folder, ruleset_path.joinpath("rules")
+            )
 
-    # The RulesArchive objects used for loading
+        elif loaded_ruleset.ruleset == RulesetTypes.LIGHTSPD:
+            # Similar processing for LightSPD if needed
+            log.info("Processing LightSPD ruleset for updates")
+            lightspd_rules, lightspd_policies = process_rules_files(
+                conf, ruleset_path
+            )
+
+            merge_rules_path_versions(
+                conf,
+                conf.local_rules_folder,
+                ruleset_path.joinpath("lightspd", "rules"),
+            )
+            merge_rules_path_versions(
+                conf,
+                conf.local_builtins_folder,
+                ruleset_path.joinpath("lightspd", "builtins"),
+            )
+
+        elif loaded_ruleset.ruleset == RulesetTypes.COMMUNITY:
+            log.info("Processing Community ruleset for updates")
+            # ... similar logic
+
+    # Summary
+    log.info("Update Summary:")
+    total_updates = sum(s["updates"] for s in total_stats.values())
+    total_additions = sum(s["additions"] for s in total_stats.values())
+    log.info(f"  Total files modified: {len(total_stats)}")
+    log.info(f"  Total rules updated: {total_updates}")
+    log.info(f"  Total rules added: {total_additions}")
+
+
+def load_rulesets_extract(conf, working_dir):
     loaded_rulesets = []
+    if conf.community_ruleset:
+        rulesets = load_ruleset(working_dir, url=RULESET_URL_SNORT_COMMUNITY)
+        if not rulesets:
+            log.error("No rulesets were loaded")
+        else:
+            loaded_rulesets.append(rulesets)
+        extract_rulesets(loaded_rulesets, working_dir.extracted_path)
+    if conf.emergingthreats_ruleset:
+        et_vers = ['edge', '2.9.7.0']  # Only two snort versions
+        snort_version_tuple = version_to_tuple(conf.snort_version)
+        url = RULESET_URL_ET_OPEN.substitute({'version': et_vers[0]})
+        et_oinkcode = False
+        if conf.defined('emergingthreats_oinkcode'):
+            et_oinkcode = conf.emergingthreats_oinkcode
+            url = RULESET_URL_ET_OPEN.substitute({'version': et_vers[0],
+                                                  'oinkcode': et_oinkcode}
+                                                 )
+        if snort_version_tuple[0] < 3:
+            if et_oinkcode:
+                url = RULESET_URL_ET_OPEN.substitute({'version': et_vers[1],
+                                                      'oinkcode': et_oinkcode})
+            else:
+                url = RULESET_URL_ET_OPEN.substitute({'version': et_vers[1]})
 
-    # Helper function for loading rulesets
+        rulesets = load_ruleset(working_dir, url=url)
+        if not rulesets:
+            log.error("No rulesets were loaded")
+        else:
+            loaded_rulesets.append(rulesets)
+        extract_rulesets(loaded_rulesets, working_dir.extracted_path)
 
-    def load_ruleset(filename=None, url=None, oinkcode=None):
-        """
-        Load the specified ruleset, locally or from URL, and add to the rulesets list
-        """
+    if conf.registered_ruleset:
+        version = sub(
+            r"[^a-zA-Z0-9]", "", "3.9.0.0"
+        )  # version in URL is alphanumeric only
+        reg_url = RULESET_URL_SNORT_REGISTERED.replace("<VERSION>", version)
+        rulesets = load_ruleset(working_dir,
+                                url=reg_url,
+                                oinkcode=conf.oinkcode)
+        if not rulesets:
+            log.error("No rulesets were loaded")
+        else:
+            loaded_rulesets.append(rulesets)
+        extract_rulesets(loaded_rulesets, working_dir.extracted_path)
 
-        log.verbose(f"Loading rules archive:\n - Source:  {filename or url}")
+    if conf.lightspd_ruleset:
+        rulesets = load_ruleset(working_dir,
+                                url=RULESET_URL_SNORT_LIGHTSPD,
+                                oinkcode=conf.oinkcode)
+        if not rulesets:
+            log.error("No rulesets were loaded")
+        else:
+            loaded_rulesets.append(rulesets)
+        extract_rulesets(loaded_rulesets, working_dir.extracted_path)
 
-        # Attempt to load the file and get the type
-        try:
-            rules_archive = RulesArchive(filename=filename, url=url, oinkcode=oinkcode)
-            ruleset_type = rules_archive.ruleset
-        except Exception as e:
-            log.warning(f"Unable to load rules archive:  {e}")
-            return
-        log.verbose(f" - Loaded as:  {ruleset_type.value}")
-
-        # Save the ruleset
-        try:
-            written_file = rules_archive.write_file(working_dir.downloaded_path)
-        except Exception as e:
-            log.warning(f"Unable to save rules archive:  {e}")
-            return
-        log.verbose(f" - Saved as:  {written_file}")
-
-        # Appends the loaded ruleset
-        loaded_rulesets.append(rules_archive)
-
-    # End helper
-
-    # Loading from a local file?
-    if conf.args.file:
-        log.debug(
-            f"Using one file for ruleset source (not downloading rulesets):\n - {conf.args.file}"
-        )
-        load_ruleset(filename=conf.args.file)
-
-    # Loading from a local folder?
-    elif conf.args.folder:
-        log.debug(
-            f"Using all files for ruleset source (not downloading) from:\n - {conf.args.folder}"
-        )
-        for path in listdir(conf.args.folder):
-            full_path = conf.args.folder.joinpath(path)
-            if isfile(full_path) and (
-                full_path.endswith("tar.gz") or (full_path.endswith("tgz"))
-            ):
-                load_ruleset(filename=full_path)
-
-    # Loading from the Snort rulesets?
-    else:
-        log.debug("Downloading Snort rulesets from Internet")
-
-        if conf.community_ruleset:
-            load_ruleset(url=RULESET_URL_SNORT_COMMUNITY)
-            if not len(loaded_rulesets):
-                log.error("No rulesets were loaded")
-            extract_rulesets(loaded_rulesets, working_dir.extracted_path)
-
-        if conf.registered_ruleset:
-            version = sub(
-                r"[^a-zA-Z0-9]", "", "3.9.0.0"
-            )  # version in URL is alphanumeric only
-            reg_url = RULESET_URL_SNORT_REGISTERED.replace("<VERSION>", version)
-            load_ruleset(url=reg_url, oinkcode=conf.oinkcode)
-            if not len(loaded_rulesets):
-                log.error("No rulesets were loaded")
-            extract_rulesets(loaded_rulesets, working_dir.extracted_path)
-
-        if conf.lightspd_ruleset:
-            load_ruleset(url=RULESET_URL_SNORT_LIGHTSPD, oinkcode=conf.oinkcode)
-            if not len(loaded_rulesets):
-                log.error("No rulesets were loaded")
-            extract_rulesets(loaded_rulesets, working_dir.extracted_path)
-
-    # -----------------------------------------------------------------------------
-    # PROCESS RULESETS HERE
-
-    log.debug("---------------------------------")
-    log.verbose("Processing rulesets")
-
-    # Check if we're in update mode
-    if (
-        conf.defined("update_mode")
-        and conf.update_mode == "update"
-        and conf.defined("local_rules_folder")
-    ):
-        log.info("Running in UPDATE mode - will update individual rule files")
-
-        # Process each ruleset separately for update mode
-        for loaded_ruleset in loaded_rulesets:
-            ruleset_path = loaded_ruleset.extracted_path
-
-            if loaded_ruleset.ruleset == RulesetTypes.REGISTERED:
-                log.info("Processing Registered ruleset for updates")
-
-                # Load rules with file tracking
-                merge_rules_path(
-                    conf, conf.local_rules_folder, ruleset_path.joinpath("rules")
-                )
-
-            elif loaded_ruleset.ruleset == RulesetTypes.LIGHTSPD:
-                # Similar processing for LightSPD if needed
-                log.info("Processing LightSPD ruleset for updates")
-                lightspd_rules, lightspd_policies = process_lightspd_files(
-                    conf, ruleset_path, working_dir
-                )
-
-                merge_rules_path_versions(
-                    conf,
-                    conf.local_rules_folder,
-                    ruleset_path.joinpath("lightspd", "rules"),
-                )
-                merge_rules_path_versions(
-                    conf,
-                    conf.local_builtins_folder,
-                    ruleset_path.joinpath("lightspd", "builtins"),
-                )
-
-            elif loaded_ruleset.ruleset == RulesetTypes.COMMUNITY:
-                log.info("Processing Community ruleset for updates")
-                # ... similar logic
-
-        # Summary
-        log.info("Update Summary:")
-        total_updates = sum(s["updates"] for s in total_stats.values())
-        total_additions = sum(s["additions"] for s in total_stats.values())
-        log.info(f"  Total files modified: {len(total_stats)}")
-        log.info(f"  Total rules updated: {total_updates}")
-        log.info(f"  Total rules added: {total_additions}")
-
-    else:
-        # Original merge mode processing
-        log.info("Running in MERGE mode - will create single rules file")
-        log.debug("---------------------------------")
-        log.verbose("Processing rulesets")
-
-        pulled_pork_file_processing(conf, working_dir)
+    return loaded_rulesets
 
 
-# *****************************************************************************
-# *****************************************************************************
-#
-#
-#                       END OF MAIN FUNCTION
-#
-#
-# *****************************************************************************
-# *****************************************************************************
-
-
-def pulled_pork_file_processing(conf, working_dir):
+def pulled_pork_file_processing(conf, loaded_rulesets, working_dir):
     all_new_rules = Rules()
     all_new_policies = Policies()
 
@@ -354,9 +382,16 @@ def pulled_pork_file_processing(conf, working_dir):
         # determine ruleset type:
         if loaded_ruleset.ruleset == RulesetTypes.COMMUNITY:
 
-            rules, policies = community_rules_processing(conf, ruleset_path)
+            rules, policies = community_rules_processing(conf,
+                                                         ruleset_path)
             all_new_rules.extend(rules)
             all_new_policies.extend(policies)
+
+        elif loaded_ruleset.ruleset == RulesetTypes.EMERGING_THREATS:
+            rules = emerging_threats_rules_processing(conf,
+                                                      ruleset_path,
+                                                      working_dir)
+            all_new_rules.extend(rules)
 
         elif loaded_ruleset.ruleset == RulesetTypes.REGISTERED:
 
@@ -367,17 +402,16 @@ def pulled_pork_file_processing(conf, working_dir):
             all_new_policies.extend(policies)
 
         elif loaded_ruleset.ruleset == RulesetTypes.LIGHTSPD:
-
-            rules, policies = lightspd_rules_processing(conf, ruleset_path, working_dir)
+            rules, policies = lightspd_rules_processing(conf,
+                                                        ruleset_path,
+                                                        working_dir)
             all_new_rules.extend(rules)
             all_new_policies.extend(policies)
             log.verbose(
-                f"Preparing to apply policy {conf.ips_policy} to LightSPD rules"
+                "Preparing to apply policy "
+                f"{conf.ips_policy} to LightSPD rules"
             )
             log.debug(f" - LightSPD rules before policy application:  {rules}")
-
-            # apply the policy to these rules
-            lightspd_rules.apply_policy(lightspd_policies[conf.ips_policy])
 
             log.verbose("Finished processing LightSPD ruleset")
             log.verbose(f" - LightSPD Rules:  {rules}")
@@ -542,11 +576,12 @@ def load_local_rules(conf, all_new_rules, all_new_policies):
         local_rules = Rules(path)
         log.info(f"loaded local rules file:  {local_rules} from {path}")
         all_new_rules.extend(local_rules)
-        # local rules don't come with a policy file, so create one (in case the rule_mode = policy)
+        # local rules don't come with a policy file,
+        # so create one (in case the rule_mode = policy)
         all_new_policies.extend(local_rules.policy_from_state(conf.ips_policy))
 
 
-def lightspd_rules_processing(conf, ruleset_path, wokring_dir):
+def lightspd_rules_processing(conf, ruleset_path, working_dir):
     lightspd_rules, lightspd_policies = process_lightspd_files(
         conf, ruleset_path, working_dir
     )
@@ -557,15 +592,95 @@ def lightspd_rules_processing(conf, ruleset_path, wokring_dir):
     lightspd_rules.extend(text_rules)
     lightspd_policies.extend(text_policies)
 
-    builtin_rules, builtin_policies = process_lightspd_builtin_files(
+    builtin_rules, builtin_policies = process_rules_files(
         conf, ruleset_path.joinpath("lightspd", "builtin")
     )
+
     lightspd_rules.extend(builtin_rules)
     lightspd_policies.extend(builtin_policies)
+    # apply the policy to these rules
+    lightspd_rules.apply_policy(lightspd_policies[conf.ips_policy])
 
     return lightspd_rules, lightspd_policies
 
 
+def emerging_threats_rules_processing(conf, ruleset_path, working_dir):
+
+    log.info("Processing Emerging Threats ruleset")
+    log.verbose(f" - Ruleset path:  {ruleset_path}")
+
+    # process text rules
+    text_rules_path = ruleset_path.joinpath("rules")
+    registered_rules = Rules(text_rules_path, conf.ignored_files)
+    registered_policies = Policies(text_rules_path)
+
+    log.debug(f" - Text Rules:  {registered_rules}")
+    log.debug(f" - Text Policies:  {registered_policies}")
+    return registered_rules
+
+
+def registered_rules_processing(conf, ruleset_path, working_dir):
+
+    log.info("Processing Registered ruleset")
+    log.verbose(f" - Ruleset path:  {ruleset_path}")
+
+    # process text rules
+    text_rules_path = ruleset_path.joinpath("rules")
+    registered_rules = Rules(text_rules_path, conf.ignored_files)
+    registered_policies = Policies(text_rules_path)
+
+    log.debug(f" - Text Rules:  {registered_rules}")
+    log.debug(f" - Text Policies:  {registered_policies}")
+
+    # process builtin rules
+    builtin_rules_path = ruleset_path.joinpath("builtins")
+    builtin_rules = Rules(builtin_rules_path)
+    builtin_policies = Policies(builtin_rules_path)
+
+    log.debug(f" - Builtin Rules:  {builtin_rules}")
+    log.debug(f" - Builtin Policies:  {builtin_policies}")
+
+    registered_rules.extend(builtin_rules)
+    registered_policies.extend(builtin_policies)
+
+    # process so rules
+    if conf.defined("sorule_path"):
+        # copy files first to temp\so_rules
+        # folder (we'll copy them all at the end, this checks for dupes)
+        # todo: error handling
+        so_src_folder = ruleset_path.joinpath("so_rules",
+                                              "precompiled",
+                                              conf.distro)
+        src_files = listdir(so_src_folder)
+        for file_name in src_files:
+            full_file_name = so_src_folder.joinpath(file_name)
+            if isfile(full_file_name):
+                copy(full_file_name, working_dir.so_rules_path)
+
+        # get SO rule stubs
+        # todo: generate stubs if distro folder doesn't exist
+        so_rules_path = ruleset_path.joinpath("so_rules")
+
+        so_rules = Rules(so_rules_path)
+        so_policies = Policies(so_rules_path)
+
+        log.debug(f" - SO Rules:  {so_rules}")
+        log.debug(f" - SO Policies:  {so_policies}")
+
+        registered_rules.extend(so_rules)
+        registered_policies.extend(so_policies)
+
+    log.verbose(f"Preparing to apply policy {conf.ips_policy} to Registered rules")
+    log.debug(f" - Registered rules before policy application:  {registered_rules}")
+
+    # apply the policy to these rules
+    registered_rules.apply_policy(registered_policies[conf.ips_policy])
+
+    log.verbose("Finished processing Registered ruleset")
+    log.verbose(f" - Registered Rules:  {registered_rules}")
+    log.verbose(f" - Registered Policies:  {registered_policies}")
+
+    return registered_rules, registered_policies
 def registered_rules_processing(conf, ruleset_path, working_dir):
 
     log.info("Processing Registered ruleset")
@@ -628,7 +743,7 @@ def registered_rules_processing(conf, ruleset_path, working_dir):
     return registered_rules, registered_policies
 
 
-def community_ruleset_processing(conf, ruleset_path):
+def community_rules_processing(conf, ruleset_path):
     log.info("Processing Community ruleset")
     log.verbose(f" - Ruleset path:  {ruleset_path}")
 
@@ -661,7 +776,8 @@ def process_rules_files(conf, ruleset_path):
         rule_version_tuple = version_to_tuple(rules_version.name)
         if rule_version_tuple <= snort_version_tuple:
 
-            rule = Rules(ruleset_path.joinpath(rules_version), conf.ignored_files)
+            rule = Rules(ruleset_path.joinpath(rules_version),
+                         conf.ignored_files)
             policy = Policies(ruleset_path.joinpath(rules_version))
 
             log.debug(f" - Rules processed:  {rules}")
