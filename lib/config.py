@@ -284,7 +284,7 @@ class Config:
             # No policy_path?
             if not self.defined("policy_path"):
                 log.error(
-                    f'`rule_mode` is set to "policy", but `policy_path` is missing in configuration'
+                    '`rule_mode` is set to "policy", but `policy_path` is missing in configuration'
                 )
 
             # Invalid IPS policy?
@@ -297,7 +297,7 @@ class Config:
         if self.rule_mode == "simple":
             if self.defined("policy_path"):
                 log.warning(
-                    f'`rule_mode` is set to "simple", but `policy_path` is is set (but not used in "simple)"'
+                    '`rule_mode` is set to "simple", but `policy_path` is is set (but not used in "simple)"'
                 )
 
         # Check for enabled rulesets that require an oinkcode
@@ -334,11 +334,10 @@ class Config:
             log.warning("`state_order` does not have three items.")
 
         # check state_order contains 'drop', 'disable', and 'enable'
-        if (
-            not "enable" in self.state_order
-            or not "drop" in self.state_order
-            or not "disable" in self.state_order
-        ):
+        exists = "enable" not in self.state_order
+        exists &= "drop" not in self.state_order
+        exists &= "disable" not in self.state_order
+        if exists:
             log.warning(
                 "`state_order` is incorrect. Must contain `enable,drop,disable`"
             )

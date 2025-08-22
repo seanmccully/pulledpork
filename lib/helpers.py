@@ -1,4 +1,3 @@
-import os.path
 from pathlib import Path
 from shutil import rmtree
 
@@ -89,4 +88,4 @@ class WorkingDirectory:
         except Exception as e:
             log.error(f"Setup of the working directory failed: {e}")
         else:
-            log.verbose(f" - Successfully setup the working directory")
+            log.verbose(" - Successfully setup the working directory")

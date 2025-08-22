@@ -104,6 +104,7 @@ def version_to_tuple(version_str):
         result.append(0)
     return tuple(result)
 
+
 def load_ruleset(working_dir, filename=None, url=None, oinkcode=None):
     """
     Load the specified ruleset, locally or from URL, and add to the rulesets list
@@ -150,7 +151,6 @@ def main():
     # we now have all required info to run, print the configuration to screen
     print_operational_settings()
 
-
     log.debug("---------------------------------")
     log.verbose("Loading rulesets")
 
@@ -166,20 +166,16 @@ def main():
                 full_path = folder.joinpath(path)
                 if full_path.is_file():
                     loaded_rulesets.append(load_ruleset(working_dir, filename=full_path))
-
-
     loaded_rulesets.extend(load_rulesets_extract(conf, working_dir))
 
     log.debug("---------------------------------")
     log.verbose("Processing rulesets")
 
     # Check if we're in update mode
-    if (
-        conf.defined("update_mode")
-        and conf.update_mode == "update"
-        and conf.defined("local_rules_folder")
-    ):
-        update_mode(conf, loaded_rulesets, working_dir)
+    if conf.defined("update_mode"):
+        if conf.update_mode == "update":
+            if conf.defined("local_rules_folder"):
+                update_mode(conf, loaded_rulesets, working_dir)
 
     else:
         # Original merge mode processing
@@ -285,8 +281,6 @@ def update_mode(conf, loaded_rulesets, working_dir):
             merge_rules_path(
                 conf, conf.local_rules_folder, ruleset_path.joinpath("rules")
             )
-
-
 
         elif loaded_ruleset.ruleset == RulesetTypes.LIGHTSPD:
             # Similar processing for LightSPD if needed
@@ -437,9 +431,10 @@ def pulled_pork_file_processing(conf, loaded_rulesets, working_dir):
         load_local_rules(conf, all_new_rules, all_new_policies)
 
     log.info("Preparing to modify rules by sid file")
-    rules_sid_mods(conf, all_new_rules)
 
-    create_policies(conf, all_new_policies)
+    log.info("Completed processing all rulesets and local rules:")
+    log.info(f" - Collected Rules:  {all_new_rules}")
+    rules_sid_mods(conf, all_new_rules)
 
     # if rule_mode is policy, and disabled rules should be written, we need to
     # enable all rules (but not modify the policy) so that all disabled rules
@@ -449,7 +444,7 @@ def pulled_pork_file_processing(conf, loaded_rulesets, working_dir):
             rule.state = True
 
     # write rules to disk
-    all_new_rules.write_file(conf.rule_path, conf.include_disabled_rules, header)
+    all_new_rules.write_file(conf.rule_path, conf.include_disabled_rules, create_policies(conf, all_new_policies))
 
     # write the policy to disk
     if conf.rule_mode == "policy":
@@ -468,7 +463,7 @@ def pulled_pork_file_processing(conf, loaded_rulesets, working_dir):
     # -----------------------------------------------------------------------------
     # Download Blocklists
 
-    donload_blocklists(conf)
+    download_blocklists(conf)
     # -----------------------------------------------------------------------------
     # Relad Snort
 
@@ -492,9 +487,6 @@ def merge_rules_path_versions(conf, local_path, ruleset_path):
 
 
 def create_policies(conf, all_new_policies):
-
-    log.info("Completed processing all rulesets and local rules:")
-    log.info(f" - Collected Rules:  {all_new_rules}")
     log.info(" - Collected Policies:")
     for policy in all_new_policies:
         log.info(f"    - {policy}")
@@ -660,68 +652,6 @@ def registered_rules_processing(conf, ruleset_path, working_dir):
         # copy files first to temp\so_rules
         # folder (we'll copy them all at the end, this checks for dupes)
         # todo: error handling
-        so_src_folder = ruleset_path.joinpath("so_rules",
-                                              "precompiled",
-                                              conf.distro)
-        src_files = listdir(so_src_folder)
-        for file_name in src_files:
-            full_file_name = so_src_folder.joinpath(file_name)
-            if isfile(full_file_name):
-                copy(full_file_name, working_dir.so_rules_path)
-
-        # get SO rule stubs
-        # todo: generate stubs if distro folder doesn't exist
-        so_rules_path = ruleset_path.joinpath("so_rules")
-
-        so_rules = Rules(so_rules_path)
-        so_policies = Policies(so_rules_path)
-
-        log.debug(f" - SO Rules:  {so_rules}")
-        log.debug(f" - SO Policies:  {so_policies}")
-
-        registered_rules.extend(so_rules)
-        registered_policies.extend(so_policies)
-
-    log.verbose(f"Preparing to apply policy {conf.ips_policy} to Registered rules")
-    log.debug(f" - Registered rules before policy application:  {registered_rules}")
-
-    # apply the policy to these rules
-    registered_rules.apply_policy(registered_policies[conf.ips_policy])
-
-    log.verbose("Finished processing Registered ruleset")
-    log.verbose(f" - Registered Rules:  {registered_rules}")
-    log.verbose(f" - Registered Policies:  {registered_policies}")
-
-    return registered_rules, registered_policies
-def registered_rules_processing(conf, ruleset_path, working_dir):
-
-    log.info("Processing Registered ruleset")
-    log.verbose(f" - Ruleset path:  {ruleset_path}")
-
-    # process text rules
-    text_rules_path = ruleset_path.joinpath("rules")
-    registered_rules = Rules(text_rules_path, conf.ignored_files)
-    registered_policies = Policies(text_rules_path)
-
-    log.debug(f" - Text Rules:  {registered_rules}")
-    log.debug(f" - Text Policies:  {registered_policies}")
-
-    # process builtin rules
-    builtin_rules_path = ruleset_path.joinpath("builtins")
-    builtin_rules = Rules(builtin_rules_path)
-    builtin_policies = Policies(builtin_rules_path)
-
-    log.debug(f" - Builtin Rules:  {builtin_rules}")
-    log.debug(f" - Builtin Policies:  {builtin_policies}")
-
-    registered_rules.extend(builtin_rules)
-    registered_policies.extend(builtin_policies)
-
-    # process so rules
-    if conf.defined("sorule_path"):
-        # copy files first to temp\so_rules
-        # folder (we'll copy them all at the end, this checks for dupes)
-        # todo: error handling
         so_src_folder = ruleset_path.joinpath("so_rules", "precompiled", conf.distro)
         src_files = listdir(so_src_folder)
         for file_name in src_files:
@@ -842,10 +772,8 @@ def process_lightspd_files(conf, ruleset_path, working_dir):
             )
 
             # Check if this version is <= our Snort version and better than current best
-            if (
-                manifest_tuple <= snort_version_tuple
-                and manifest_tuple > best_match_tuple
-            ):
+            is_version = (manifest_tuple <= snort_version_tuple and manifest_tuple > best_match_tuple)
+            if is_version:
                 best_match = manifest_version
                 best_match_tuple = manifest_tuple
                 log.debug(f"  -> New best match: {best_match}")
@@ -872,11 +800,13 @@ def process_lightspd_files(conf, ruleset_path, working_dir):
             if conf.distro not in manifest["snort versions"][version_to_use].get(
                 "architectures", {}
             ):
+                ver = manifest["snort versions"][version_to_use]
                 log.warning(
                     f"Architecture {conf.distro} not found for version {version_to_use}"
                 )
                 log.warning(
-                    f'Available architectures: {list(manifest["snort versions"][version_to_use].get("architectures", {}).keys())}'
+                    "Available architectures: "
+                    f"{list(ver.get("architectures", {}).keys())}"
                 )
             else:
                 modules_path = manifest["snort versions"][version_to_use][
@@ -1160,7 +1090,9 @@ def print_operational_settings():
         )
     elif conf.args.folder:
         log.verbose(
-            f"Rulesets will not be downloaded, they will be loaded from all files in local folder: \n\t {conf.args.folder}"
+            "Rulesets will not be downloaded, "
+            "they will be loaded from all files "
+            f"in local folder: \n\t {conf.args.folder}"
         )
     else:
         log.verbose("Rulesets will be downloaded from: ")
