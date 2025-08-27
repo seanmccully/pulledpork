@@ -159,6 +159,13 @@ class Config:
                     out_list.append(thing)
             return out_list
 
+            if not self.defined("snort2lua_path"):
+                self.snort2lua_path = "snort2lua"
+            else:
+                if not os.path.isfile(self.snort2lua_path):
+                    log.warning(f"snort2lua not found at: {self.snort2lua_path}")
+                    self.snort2lua_path = "snort2lua"
+
         # Otherwise create a list from the value
         # Check for local_rules_folder if in update mode
         if self.defined("update_mode"):

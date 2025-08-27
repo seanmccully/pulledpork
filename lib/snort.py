@@ -68,8 +68,7 @@ RULESET_EMERGING_FILE_CHECKS = [
     "rules/threatview_CS_c2.rules",
 ]
 
-RULESET_EMERGING_PRO_FILE_CHECKS = [
-]
+RULESET_EMERGING_PRO_FILE_CHECKS = []
 ###############################################################################
 # Enums
 ###############################################################################
@@ -557,8 +556,7 @@ class Rules:
                                     "original_line": line,
                                 }
                         except Exception as e:
-                            log.debug("Error parsing rule at line"
-                                      f" {line_num}: {e}")
+                            log.debug("Error parsing rule at line" f" {line_num}: {e}")
 
             # Track updates
             updates = 0
@@ -580,8 +578,9 @@ class Rules:
                         line_idx = local_rules[rule_id]["line_num"]
                         local_lines[line_idx] = new_rule.stateful_text + "\n"
                         updates += 1
-                        log.debug(f"  Updated {rule_id}: "
-                                  f"rev {local_rev} -> {new_rev}")
+                        log.debug(
+                            f"  Updated {rule_id}: " f"rev {local_rev} -> {new_rev}"
+                        )
                 else:
                     # New rule - append to file
                     local_lines.append(new_rule.stateful_text + "\n")
@@ -862,9 +861,9 @@ class Rules:
 
         # Ensure we have something to modify
         if state is None and action is None:
-            raise ValueError("No rule modifications"
-                             " to make; state or "
-                             "action required")
+            raise ValueError(
+                "No rule modifications" " to make; state or " "action required"
+            )
 
         # If rule_ids is a string, make it a list
         if isinstance(rule_ids, str):
@@ -887,10 +886,7 @@ class Rules:
                     sid = int(rule.sid)
                     gid = int(rule.gid)
                     if (
-                        gid >= start_gid
-                        and gid <= end_gid
-                        and sid >= start_sid
-                        and sid <= end_sid
+                        gid >= start_gid and gid <= end_gid and sid >= start_sid and sid <= end_sid
                     ):
                         if state is not None:
                             rule.state = state
@@ -927,16 +923,15 @@ class Rules:
 
         # Ensure we have something to modify
         if state is None and action is None:
-            raise ValueError("No rule modifications "
-                             "to make; state or "
-                             "action required")
+            raise ValueError(
+                "No rule modifications " "to make; state or " "action required"
+            )
 
         # If it's a string, compile it
         if isinstance(regex_pattern, str):
             regex_pattern = re.compile(regex_pattern)
         elif not isinstance(regex_pattern, re.Pattern):
-            raise ValueError("Provided regex pattern "
-                             "must be a str or re.Pattern")
+            raise ValueError("Provided regex pattern " "must be a str or re.Pattern")
 
         # Work through the rules
         for rule in self._all_rules.values():
@@ -981,9 +976,9 @@ class Rules:
 
                 # If the current rule has a later or same rev, move on
                 if current_rule.rev >= new_rule.rev:
-                    log.verbose("Duplicate rule_id "
-                                "with same/earlier "
-                                "rev; skipping")
+                    log.verbose(
+                        "Duplicate rule_id " "with same/earlier " "rev; skipping"
+                    )
                     continue
 
             # Save the rule to cache
@@ -1024,23 +1019,19 @@ class Rules:
         if isinstance(sid_file, str):
             sid_file = Path(sid_file)
 
-        log.debug(f"- `{type}`: Changing "
-                  "rules by SID, input "
-                  f"filename is {sid_file}")
+        log.debug(
+            f"- `{type}`: Changing " "rules by SID, input " f"filename is {sid_file}"
+        )
 
         # make sure we have a sid_file and the type
         if type not in ["enable", "disable", "drop"]:
             raise ValueError(
-                "Invalid `Type` "
-                "provided to function "
-                "load_sid_modification_file"
+                "Invalid `Type` " "provided to function " "load_sid_modification_file"
             )
 
         if sid_file is None:
             raise ValueError(
-                "No `sid_value` provided "
-                "to function "
-                "load_sid_modification_file"
+                "No `sid_value` provided " "to function " "load_sid_modification_file"
             )
 
         # what are we doing?
@@ -1086,14 +1077,10 @@ class Rules:
                     elif pattern.startswith("cve:"):
                         # ex: reference:cve,2008-1447;
                         pattern = pattern.replace(":", ",", 1)
-                        self.modify_by_regex(f"reference:{pattern};",
-                                             state,
-                                             action)
+                        self.modify_by_regex(f"reference:{pattern};", state, action)
                     elif pattern.startswith("bugtraq:"):
                         pattern = pattern.replace(":", ",", 1)
-                        self.modify_by_regex(f"reference:{pattern};",
-                                             state,
-                                             action)
+                        self.modify_by_regex(f"reference:{pattern};", state, action)
                     elif pattern.startswith("pcre:"):
                         self.modify_by_regex(f"{pattern[5:]};", state, action)
                     elif re.search(r"^\d+:\d+$", pattern):
@@ -1101,18 +1088,17 @@ class Rules:
                     elif re.search(r"^\d+:\d+-\d+:\d+$", pattern):
                         self.modify(pattern, state, action)
                     elif pattern.startswith("VRT-"):
-                        log.warning("sid processing "
-                                    "not implemented"
-                                    " yet for categories")
+                        log.warning(
+                            "sid processing " "not implemented" " yet for categories"
+                        )
                     elif pattern.startswith("ET-"):
-                        log.warning("sid processing"
-                                    " not implemented"
-                                    " yet for categories")
+                        log.warning(
+                            "sid processing" " not implemented" " yet for categories"
+                        )
                     elif pattern.startswith("Custom-"):
-                        log.warning("sid processing "
-                                    "not implemented"
-                                    " yet for "
-                                    "categories")
+                        log.warning(
+                            "sid processing " "not implemented" " yet for " "categories"
+                        )
                     else:
                         # unknown
                         log.warning(
@@ -1210,11 +1196,7 @@ class Policy:
         rule_id = f"{gid}:{sid}"
 
         # Save the rule to the dict
-        self.rules[rule_id] = {"gid": gid,
-                               "sid": sid,
-                               "action": action,
-                               "state": state
-                               }
+        self.rules[rule_id] = {"gid": gid, "sid": sid, "action": action, "state": state}
 
     def load_file(self, policy_file):
         """
@@ -1303,8 +1285,7 @@ class Policy:
 
         # Wut?
         if not isinstance(other_policy, Policy):
-            raise ValueError("Not a recognized "
-                             f"Policy object:  {other_policy}")
+            raise ValueError("Not a recognized " f"Policy object:  {other_policy}")
 
         # Update the rules in this policy from the other
         self.rules.update(other_policy.rules)
@@ -1414,9 +1395,11 @@ class Policies:
             raise FileNotFoundError(rules_path)
 
     def __repr__(self):
-        return "Policies(loaded:" \
-               f"{len(self._policies)}, " \
-               f"names:[{', '.join(self._policies.keys())}])"
+        return (
+            "Policies(loaded:"
+            f"{len(self._policies)}, "
+            f"names:[{', '.join(self._policies.keys())}])"
+        )
 
     def __len__(self):
         """
@@ -1606,9 +1589,7 @@ class Policies:
                 self._policies[oth.name] = oth
 
         else:
-            raise ValueError(
-                f"Not a recognized Policy or Polcies object:  {oth}"
-            )
+            raise ValueError(f"Not a recognized Policy or Polcies object:  {oth}")
 
 
 ###############################################################################
@@ -1627,8 +1608,9 @@ class RulesArchive:
 
         # Validate only one set
         if filename and url:
-            raise ValueError("Only one -- `filename` or `url` "
-                             "-- may be used at once")
+            raise ValueError(
+                "Only one -- `filename` or `url` " "-- may be used at once"
+            )
 
         # Setup the archive
         self._data = None
@@ -1647,7 +1629,7 @@ class RulesArchive:
         return f"RulesArchive(ruleset:{self.ruleset})"
 
     def __bool__(self):
-        if (self._ruleset != RulesetTypes.UNKNOWN):
+        if self._ruleset != RulesetTypes.UNKNOWN:
             return True
         elif self._data:
             return True
@@ -1703,17 +1685,13 @@ class RulesArchive:
                     filenames = fh.getnames()
 
                     # These checks kinda suck, but...
-                    if all(x in filenames for x in
-                           RULESET_COMMUNITY_FILE_CHECKS):
+                    if all(x in filenames for x in RULESET_COMMUNITY_FILE_CHECKS):
                         self._ruleset = RulesetTypes.COMMUNITY
-                    elif all(x in filenames for x in
-                             RULESET_REGISTERED_FILE_CHECKS):
+                    elif all(x in filenames for x in RULESET_REGISTERED_FILE_CHECKS):
                         self._ruleset = RulesetTypes.REGISTERED
-                    elif all(x in filenames for x in
-                             RULESET_REGISTERED_FILE_CHECKS):
+                    elif all(x in filenames for x in RULESET_REGISTERED_FILE_CHECKS):
                         self._ruleset = RulesetTypes.LIGHTSPD
-                    elif all(x in filenames for x in
-                             RULESET_EMERGING_FILE_CHECKS):
+                    elif all(x in filenames for x in RULESET_EMERGING_FILE_CHECKS):
                         self._ruleset = RulesetTypes.EMERGING_THREATS
 
                     # Have no idea
@@ -1889,6 +1867,4 @@ class SnortRuleParser:
             # Comment out older revisions
             for rule in found_rules[1:]:
                 if not rule["is_commented"]:
-                    self.comment_out_rule(rule["file_path"],
-                                          rule["line_num"],
-                                          dry_run)
+                    self.comment_out_rule(rule["file_path"], rule["line_num"], dry_run)

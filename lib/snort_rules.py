@@ -2,11 +2,8 @@
 
 import re
 import os
-import sys
-import argparse
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
-from datetime import datetime
+from typing import List, Dict
 import shutil
 
 
@@ -128,5 +125,4 @@ class SnortRuleParser:
                             f"    ⚠ Skipping pulledpork.rules - should be handled by pulledpork config"
                         )
                         continue
-
                     self.comment_out_rule(rule["file_path"], rule["line_num"], dry_run)

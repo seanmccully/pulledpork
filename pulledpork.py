@@ -67,8 +67,12 @@ RULESET_URL_SNORT_REGISTERED = (
 RULESET_URL_SNORT_LIGHTSPD = "https://snort.org/rules/Talos_LightSPD.tar.gz"
 
 # TODO: Support for the ET Rulesets has not yet been implemented
-RULESET_URL_ET_OPEN = Template('https://rules.emergingthreats.net/open/snort-$version/emerging.rules.tar.gz')
-RULESET_URL_ET_PRO = Template('https://rules.emergingthreatspro.com/$oinkcode/snort-$version/etpro.rules.tar.gz')
+RULESET_URL_ET_OPEN = Template(
+    "https://rules.emergingthreats.net/open/snort-$version/emerging.rules.tar.gz"
+)
+RULESET_URL_ET_PRO = Template(
+    "https://rules.emergingthreatspro.com/$oinkcode/snort-$version/etpro.rules.tar.gz"
+)
 
 # URLs for supported blocklists
 SNORT_BLOCKLIST_URL = "https://snort.org/downloads/ip-block-list"
@@ -132,6 +136,7 @@ def load_ruleset(working_dir, filename=None, url=None, oinkcode=None):
     # Appends the loaded ruleset
     return rules_archive
 
+
 # End helper
 
 
@@ -165,7 +170,9 @@ def main():
             for path in folder.iterdir():
                 full_path = folder.joinpath(path)
                 if full_path.is_file():
-                    loaded_rulesets.append(load_ruleset(working_dir, filename=full_path))
+                    loaded_rulesets.append(
+                        load_ruleset(working_dir, filename=full_path)
+                    )
     loaded_rulesets.extend(load_rulesets_extract(conf, working_dir))
 
     log.debug("---------------------------------")
@@ -195,6 +202,7 @@ def main():
 #
 # *****************************************************************************
 # *****************************************************************************
+
 
 def load_conf():
 
@@ -285,9 +293,7 @@ def update_mode(conf, loaded_rulesets, working_dir):
         elif loaded_ruleset.ruleset == RulesetTypes.LIGHTSPD:
             # Similar processing for LightSPD if needed
             log.info("Processing LightSPD ruleset for updates")
-            lightspd_rules, lightspd_policies = process_rules_files(
-                conf, ruleset_path
-            )
+            lightspd_rules, lightspd_policies = process_rules_files(conf, ruleset_path)
 
             merge_rules_path_versions(
                 conf,
@@ -304,7 +310,7 @@ def update_mode(conf, loaded_rulesets, working_dir):
             log.info("Processing Community ruleset for updates")
             # ... similar logic
             community_rules, _ = process_rules_files(
-                conf, ruleset_path.joinpath('rules')
+                conf, ruleset_path.joinpath("rules")
             )
 
     # Summary
@@ -326,21 +332,22 @@ def load_rulesets_extract(conf, working_dir):
             loaded_rulesets.append(rulesets)
         extract_rulesets(loaded_rulesets, working_dir.extracted_path)
     if conf.emergingthreats_ruleset:
-        et_vers = ['edge', '2.9.7.0']  # Only two snort versions
+        et_vers = ["edge", "2.9.7.0"]  # Only two snort versions
         snort_version_tuple = version_to_tuple(conf.snort_version)
-        url = RULESET_URL_ET_OPEN.substitute({'version': et_vers[0]})
+        url = RULESET_URL_ET_OPEN.substitute({"version": et_vers[0]})
         et_oinkcode = False
-        if conf.defined('emergingthreats_oinkcode'):
+        if conf.defined("emergingthreats_oinkcode"):
             et_oinkcode = conf.emergingthreats_oinkcode
-            url = RULESET_URL_ET_OPEN.substitute({'version': et_vers[0],
-                                                  'oinkcode': et_oinkcode}
-                                                 )
+            url = RULESET_URL_ET_OPEN.substitute(
+                {"version": et_vers[0], "oinkcode": et_oinkcode}
+            )
         if snort_version_tuple[0] < 3:
             if et_oinkcode:
-                url = RULESET_URL_ET_OPEN.substitute({'version': et_vers[1],
-                                                      'oinkcode': et_oinkcode})
+                url = RULESET_URL_ET_OPEN.substitute(
+                    {"version": et_vers[1], "oinkcode": et_oinkcode}
+                )
             else:
-                url = RULESET_URL_ET_OPEN.substitute({'version': et_vers[1]})
+                url = RULESET_URL_ET_OPEN.substitute({"version": et_vers[1]})
 
         rulesets = load_ruleset(working_dir, url=url)
         if not rulesets:
@@ -354,9 +361,7 @@ def load_rulesets_extract(conf, working_dir):
             r"[^a-zA-Z0-9]", "", "3.9.0.0"
         )  # version in URL is alphanumeric only
         reg_url = RULESET_URL_SNORT_REGISTERED.replace("<VERSION>", version)
-        rulesets = load_ruleset(working_dir,
-                                url=reg_url,
-                                oinkcode=conf.oinkcode)
+        rulesets = load_ruleset(working_dir, url=reg_url, oinkcode=conf.oinkcode)
         if not rulesets:
             log.error("No rulesets were loaded")
         else:
@@ -364,9 +369,9 @@ def load_rulesets_extract(conf, working_dir):
         extract_rulesets(loaded_rulesets, working_dir.extracted_path)
 
     if conf.lightspd_ruleset:
-        rulesets = load_ruleset(working_dir,
-                                url=RULESET_URL_SNORT_LIGHTSPD,
-                                oinkcode=conf.oinkcode)
+        rulesets = load_ruleset(
+            working_dir, url=RULESET_URL_SNORT_LIGHTSPD, oinkcode=conf.oinkcode
+        )
         if not rulesets:
             log.error("No rulesets were loaded")
         else:
@@ -388,15 +393,12 @@ def pulled_pork_file_processing(conf, loaded_rulesets, working_dir):
         # determine ruleset type:
         if loaded_ruleset.ruleset == RulesetTypes.COMMUNITY:
 
-            rules, policies = community_rules_processing(conf,
-                                                         ruleset_path)
+            rules, policies = community_rules_processing(conf, ruleset_path)
             all_new_rules.extend(rules)
             all_new_policies.extend(policies)
 
         elif loaded_ruleset.ruleset == RulesetTypes.EMERGING_THREATS:
-            rules = emerging_threats_rules_processing(conf,
-                                                      ruleset_path,
-                                                      working_dir)
+            rules = emerging_threats_rules_processing(conf, ruleset_path, working_dir)
             all_new_rules.extend(rules)
 
         elif loaded_ruleset.ruleset == RulesetTypes.REGISTERED:
@@ -408,14 +410,11 @@ def pulled_pork_file_processing(conf, loaded_rulesets, working_dir):
             all_new_policies.extend(policies)
 
         elif loaded_ruleset.ruleset == RulesetTypes.LIGHTSPD:
-            rules, policies = lightspd_rules_processing(conf,
-                                                        ruleset_path,
-                                                        working_dir)
+            rules, policies = lightspd_rules_processing(conf, ruleset_path, working_dir)
             all_new_rules.extend(rules)
             all_new_policies.extend(policies)
             log.verbose(
-                "Preparing to apply policy "
-                f"{conf.ips_policy} to LightSPD rules"
+                "Preparing to apply policy " f"{conf.ips_policy} to LightSPD rules"
             )
             log.debug(f" - LightSPD rules before policy application:  {rules}")
 
@@ -444,7 +443,11 @@ def pulled_pork_file_processing(conf, loaded_rulesets, working_dir):
             rule.state = True
 
     # write rules to disk
-    all_new_rules.write_file(conf.rule_path, conf.include_disabled_rules, create_policies(conf, all_new_policies))
+    all_new_rules.write_file(
+        conf.rule_path,
+        conf.include_disabled_rules,
+        create_policies(conf, all_new_policies),
+    )
 
     # write the policy to disk
     if conf.rule_mode == "policy":
@@ -539,9 +542,9 @@ def rules_sid_mods(conf, all_new_rules):
 
 
 def merge_rules_path(conf, local_path, ruleset_path):
-
+    # Fix: Don't double the path
     update_rules = Rules(
-        ruleset_path.joinpath(ruleset_path),
+        ruleset_path,  # Changed from ruleset_path.joinpath(ruleset_path)
         ignored_files=conf.ignored_files,
         track_files=True,
     )
@@ -609,17 +612,37 @@ def lightspd_rules_processing(conf, ruleset_path, working_dir):
 
 
 def emerging_threats_rules_processing(conf, ruleset_path, working_dir):
-
     log.info("Processing Emerging Threats ruleset")
     log.verbose(f" - Ruleset path:  {ruleset_path}")
 
-    # process text rules
+    # Original rules path (Snort 2 format)
     text_rules_path = ruleset_path.joinpath("rules")
-    registered_rules = Rules(text_rules_path, conf.ignored_files)
-    registered_policies = Policies(text_rules_path)
 
+    # Check Snort version to determine if conversion is needed
+    snort_version_tuple = version_to_tuple(conf.snort_version)
+
+    if snort_version_tuple[0] >= 3:
+        # Snort 3 - need to convert rules
+        log.info("Detected Snort 3 - converting ET rules from Snort 2 format")
+
+        # Convert the rules
+        converted_path = convert_snort2_to_snort3_rules(text_rules_path, working_dir)
+
+        if converted_path and converted_path.exists():
+            # Use converted rules
+            registered_rules = Rules(converted_path, conf.ignored_files)
+            log.verbose(f" - Converted Rules:  {registered_rules}")
+        else:
+            log.error("Failed to convert ET rules to Snort 3 format")
+            return Rules()  # Return empty Rules object
+    else:
+        # Snort 2 - use rules as-is
+        registered_rules = Rules(text_rules_path, conf.ignored_files)
+        log.verbose(f" - Text Rules:  {registered_rules}")
+
+    # ET rules don't come with policies, so we don't process them
     log.debug(f" - Text Rules:  {registered_rules}")
-    log.debug(f" - Text Policies:  {registered_policies}")
+
     return registered_rules
 
 
@@ -718,8 +741,7 @@ def process_rules_files(conf, ruleset_path):
         rule_version_tuple = version_to_tuple(rules_version.name)
         if rule_version_tuple <= snort_version_tuple:
 
-            rule = Rules(ruleset_path.joinpath(rules_version),
-                         conf.ignored_files)
+            rule = Rules(ruleset_path.joinpath(rules_version), conf.ignored_files)
             policy = Policies(ruleset_path.joinpath(rules_version))
 
             log.debug(f" - Rules processed:  {rules}")
@@ -772,7 +794,10 @@ def process_lightspd_files(conf, ruleset_path, working_dir):
             )
 
             # Check if this version is <= our Snort version and better than current best
-            is_version = (manifest_tuple <= snort_version_tuple and manifest_tuple > best_match_tuple)
+            is_version = (
+                manifest_tuple <= snort_version_tuple
+                and manifest_tuple > best_match_tuple
+            )
             if is_version:
                 best_match = manifest_version
                 best_match_tuple = manifest_tuple
