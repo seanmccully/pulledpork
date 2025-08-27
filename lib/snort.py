@@ -270,7 +270,7 @@ class Blocklist:
         """
 
         # Open the blocklist file and read all the lines
-        with open(blocklist_file, "r") as fh:
+        with open(blocklist_file, "r+") as fh:
             blocklist = fh.readlines()
 
             # Extend this blocklist with the loaded file
@@ -289,7 +289,7 @@ class Blocklist:
         """
 
         # Open the file for writing
-        with open(blocklist_file, "w") as fh:
+        with open(blocklist_file, "w+") as fh:
 
             # Write a file header?
             if header is not None:
@@ -468,7 +468,7 @@ class Rules:
             if str(rules_file) not in self._rules_by_file:
                 self._rules_by_file[str(rules_file)] = []
 
-        with rules_file.open("r") as fh:
+        with rules_file.open("r+") as fh:
             metadata["file_path"] = str(rules_file)
             metadata["file_name"] = rules_file.name
 
@@ -526,7 +526,7 @@ class Rules:
             local_rules = {}
             local_lines = []
 
-            with local_file.open("r") as f:
+            with local_file.open("r+") as f:
                 for line_num, line in enumerate(f, 1):
                     local_lines.append(line)
 
@@ -602,7 +602,7 @@ class Rules:
                         log.verbose(f"  Created backup: {backup_file}")
 
                     # Write updated content
-                    with local_file.open("w") as f:
+                    with local_file.open("w+") as f:
                         f.writelines(local_lines)
 
                     log.info(
@@ -735,7 +735,7 @@ class Rules:
         rules_file = Path(rules_file)
 
         # Open the file for writing
-        with rules_file.open("w") as fh:
+        with rules_file.open("w+") as fh:
 
             # Write a file header?
             if header is not None:
@@ -1046,7 +1046,7 @@ class Rules:
             action = "drop"
 
         # do it
-        with sid_file.open("r") as fh:
+        with sid_file.open("r+") as fh:
             for line_num, line in enumerate(fh.readlines(), 1):
 
                 # Strip the line
@@ -1212,7 +1212,7 @@ class Policy:
         """
         policy_file = Path(policy_file)
         # Work through the policy file
-        with policy_file.open("r") as fh:
+        with policy_file.open("r+") as fh:
             for line in fh.readlines():
 
                 # Strip the line
@@ -1296,7 +1296,7 @@ class Policy:
         """
         policy_file = Path(policy_file)
         # Open the file for writing
-        with policy_file.open("w") as fh:
+        with policy_file.open("w+") as fh:
 
             # Write a file header?
             if header is not None:
@@ -1808,7 +1808,7 @@ class SnortRuleParser:
         """
         try:
             # Read the file
-            with open(file_path, "r") as f:
+            with open(file_path, "r+") as f:
                 lines = f.readlines()
 
             # Check if line is already commented
@@ -1830,7 +1830,7 @@ class SnortRuleParser:
             )
 
             # Write back
-            with open(file_path, "w") as f:
+            with open(file_path, "w+") as f:
                 f.writelines(lines)
 
             print(f"      ✓ Commented out line {line_num}")
