@@ -626,7 +626,7 @@ def emerging_threats_rules_processing(conf, ruleset_path, working_dir):
         log.info("Detected Snort 3 - converting ET rules from Snort 2 format")
 
         # Convert the rules
-        converted_path = convert_snort2_to_snort3_rules(text_rules_path, working_dir)
+        converted_path = helpers.convert_snort2_to_snort3_rules(text_rules_path, working_dir)
 
         if converted_path and converted_path.exists():
             # Use converted rules

@@ -94,7 +94,6 @@ class WorkingDirectory:
         else:
             log.verbose(" - Successfully setup the working directory")
 
-
 def convert_snort2_to_snort3_rules(rules_path, working_dir):
     """
     Convert Snort 2 rules to Snort 3 format using snort2lua
@@ -115,12 +114,13 @@ def convert_snort2_to_snort3_rules(rules_path, working_dir):
     rules_path = Path(rules_path)
     converted_count = 0
     failed_count = 0
+    total_rejected = 0
 
     for rule_file in rules_path.glob("*.rules"):
         output_file = converted_path / rule_file.name
 
-        # Run snort2lua for this file
-        command = f"snort2lua -c {rule_file} -r {rule_file}"
+        # Run snort2lua with correct syntax
+        command = f"snort2lua -c {rule_file} -r {output_file}"
         log.verbose(f"Converting {rule_file.name} using snort2lua")
 
         try:
@@ -129,32 +129,28 @@ def convert_snort2_to_snort3_rules(rules_path, working_dir):
             )
             output, error = process.communicate()
 
-            if process.returncode == 0:
-                # Parse the converted rules from stdout
-                # snort2lua outputs to stdout by default
-                with output_file.open("w") as f:
-                    # Filter out non-rule lines from the output
-                    for line in output.splitlines():
-                        # Skip lua configuration lines, only keep actual rules
-                        line = line.strip()
-                        if not line.startswith("--") and not line.starswith("require"):
-                            for _key in ("alert", "drop", "pass", "reject", "block"):
-                                if _key in line:
-                                    f.write(line + "\n")
-                                    break
+            # snort2lua returns non-zero if there are rejected rules
+            # but it still creates the output file with converted rules
+            if output_file.exists() and output_file.stat().st_size > 0:
                 converted_count += 1
                 log.debug(f"  Converted: {rule_file.name}")
+
+                # Check for rejected rules
+                reject_file = Path("snort.rej")
+                if reject_file.exists():
+                    with reject_file.open("r") as f:
+                        rejected_rules = f.readlines()
+                    rejected_count = len([line for line in rejected_rules if line.strip() and not line.startswith("#")])
+                    if rejected_count > 0:
+                        log.warning(f"  {rejected_count} rules rejected from {rule_file.name}")
+                        total_rejected += rejected_count
+                    # Clean up reject file
+                    reject_file.unlink()
             else:
-                log.warning(
-                    f"Bulk conversion failed for {rule_file.name}, trying line-by-line"
-                )
-                if convert_rules_file_individually(rule_file, output_file):
-                    converted_count += 1
-                else:
-                    failed_count += 1
-                    log.warning(f"  Failed to convert: {rule_file.name}")
-                    if error:
-                        log.debug(f"  Error: {error}")
+                failed_count += 1
+                log.warning(f"  Failed to convert: {rule_file.name}")
+                if error:
+                    log.debug(f"  Error: {error[:500]}")
 
         except Exception as e:
             failed_count += 1
@@ -163,6 +159,8 @@ def convert_snort2_to_snort3_rules(rules_path, working_dir):
     log.info(
         f"Conversion complete: {converted_count} files converted, {failed_count} failed"
     )
+    if total_rejected > 0:
+        log.warning(f"Total rules rejected across all files: {total_rejected}")
 
     if converted_count == 0:
         log.error("No rules were successfully converted")
@@ -182,7 +180,10 @@ def convert_rules_file_individually(input_file, output_file):
     Returns:
         True if at least some rules were converted
     """
+    import tempfile
+
     converted_rules = []
+    temp_dir = Path(tempfile.gettempdir())
 
     with input_file.open("r") as f:
         for line_num, line in enumerate(f, 1):
@@ -194,14 +195,17 @@ def convert_rules_file_individually(input_file, output_file):
 
             # Create temp file with single rule
             with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".rules", delete=False
+                mode="w", suffix=".rules", delete=False, dir=temp_dir
             ) as tmp:
                 tmp.write(line)
-                tmp_path = tmp.name
+                tmp_path = Path(tmp.name)
 
             try:
+                # Create temp output file
+                temp_output = temp_dir / f"conv_{line_num}.rules"
+
                 # Try to convert single rule
-                command = f"snort2lua -c {tmp_path} -r {tmp_path}"
+                command = f"snort2lua -c {tmp_path} -r {temp_output}"
                 process = Popen(
                     command,
                     stdout=PIPE,
@@ -211,21 +215,22 @@ def convert_rules_file_individually(input_file, output_file):
                 )
                 output, error = process.communicate()
 
-                if process.returncode == 0:
-                    # Extract the converted rule from output
-                    for out_line in output.splitlines():
-                        out_line = out_line.strip()
-                        if not out_line.startswith("--"):
-                            for _key in ("alert", "drop"):
-                                if _key in out_line:
-                                    converted_rules.append(out_line)
-                                    break
-                else:
-                    log.debug(f"    Line {line_num}: Could not convert")
+                # Check if output file was created
+                if temp_output.exists():
+                    with temp_output.open("r") as f:
+                        converted_rule = f.read().strip()
+                        if converted_rule:
+                            converted_rules.append(converted_rule)
+                    temp_output.unlink()
+
+                # Clean up reject file if it exists
+                reject_file = Path("snort.rej")
+                if reject_file.exists():
+                    reject_file.unlink()
 
             finally:
                 # Clean up temp file
-                os.unlink(tmp_path)
+                tmp_path.unlink(missing_ok=True)
 
     # Write successfully converted rules
     if converted_rules:
