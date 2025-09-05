@@ -94,20 +94,18 @@ class WorkingDirectory:
         else:
             log.verbose(" - Successfully setup the working directory")
 
-def convert_snort2_to_snort3_rules(rules_path, working_dir):
-    """
-    Convert Snort 2 rules to Snort 3 format using snort2lua
 
-    Args:
-        rules_path: Path containing Snort 2 format rules
-        working_dir: Working directory for converted rules
-
-    Returns:
-        Path to converted rules directory
-    """
-
+def convert_snort2_to_snort3_rules(snort2lua_path, rules_path, working_dir):
     converted_path = working_dir.path.joinpath("converted_snort3_rules")
     converted_path.mkdir(exist_ok=True)
+
+    # 0) sanity: make sure we’re calling the right tool
+    try:
+        p = Popen(f"{snort2lua_path} -V", stdout=PIPE, stderr=PIPE, shell=True, universal_newlines=True)
+        out, err = p.communicate(timeout=5)
+        log.verbose(f"snort2lua version: {out.strip() or err.strip()}")
+    except Exception:
+        pass
 
     log.info("Converting Emerging Threats Snort 2 rules to Snort 3 format")
 
@@ -116,49 +114,72 @@ def convert_snort2_to_snort3_rules(rules_path, working_dir):
     failed_count = 0
     total_rejected = 0
 
-    for rule_file in rules_path.glob("*.rules"):
-        output_file = converted_path / rule_file.name
+    # 1) Skip known-problematic ET rule files
+    skip_names = {"deleted.rules", "scada.rules", "scada_special.rules"}
 
-        # Run snort2lua with correct syntax
-        command = f"snort2lua -c {rule_file} -r {output_file}"
+    # 2) run per file, but anchor the child cwd so snort.rej and snort.lua land where we expect
+    for rule_file in rules_path.glob("*.rules"):
+        if rule_file.name in skip_names:
+            log.verbose(f"  Skipping known incompatible file: {rule_file.name}")
+            continue
+
+        output_file = converted_path / rule_file.name
+        command = f"{snort2lua_path} -c {rule_file} -r {output_file}"
         log.verbose(f"Converting {rule_file.name} using snort2lua")
 
         try:
             process = Popen(
-                command, stdout=PIPE, stderr=PIPE, shell=True, universal_newlines=True
+                command,
+                stdout=PIPE,
+                stderr=PIPE,
+                shell=True,
+                universal_newlines=True,
+                cwd=str(converted_path)  # <-- critical: capture snort.rej & snort.lua here
             )
             output, error = process.communicate()
 
-            # snort2lua returns non-zero if there are rejected rules
-            # but it still creates the output file with converted rules
+            # 3) if we got some output, count it; also capture rejects and thresholds
             if output_file.exists() and output_file.stat().st_size > 0:
                 converted_count += 1
                 log.debug(f"  Converted: {rule_file.name}")
 
-                # Check for rejected rules
-                reject_file = Path("snort.rej")
+                # rejected rules
+                reject_file = converted_path / "snort.rej"
                 if reject_file.exists():
                     with reject_file.open("r") as f:
-                        rejected_rules = f.readlines()
-                    rejected_count = len([line for line in rejected_rules if line.strip() and not line.startswith("#")])
-                    if rejected_count > 0:
-                        log.warning(f"  {rejected_count} rules rejected from {rule_file.name}")
-                        total_rejected += rejected_count
-                    # Clean up reject file
-                    reject_file.unlink()
+                        rejected_rules = [
+                            line for line in f.readlines()
+                            if line.strip() and not line.startswith("#")
+                        ]
+                    if rejected_rules:
+                        log.warning(f"  {len(rejected_rules)} rules rejected from {rule_file.name}")
+                        total_rejected += len(rejected_rules)
+                    reject_file.unlink(missing_ok=True)
+
+                # thresholds/suppressions: snort2lua emits snort.lua; stash & append
+                thresholds_src = converted_path / "snort.lua"
+                if thresholds_src.exists():
+                    thresholds_dst = converted_path / "et_thresholds.lua"
+                    with thresholds_src.open("r") as src, thresholds_dst.open("a") as dst:
+                        dst.write(f"\n-- thresholds from {rule_file.name}\n")
+                        dst.write(src.read())
+                    thresholds_src.unlink(missing_ok=True)
+
             else:
-                failed_count += 1
-                log.warning(f"  Failed to convert: {rule_file.name}")
-                if error:
-                    log.debug(f"  Error: {error[:500]}")
+                # 4) fallback to per-line conversion to rescue partial content
+                log.warning(f"  Bulk conversion failed for: {rule_file.name}. Trying line-by-line.")
+                if convert_rules_file_individually(rule_file, output_file):
+                    converted_count += 1
+                else:
+                    failed_count += 1
+                    if error:
+                        log.debug(f"  Error: {error[:500]}")
 
         except Exception as e:
             failed_count += 1
             log.warning(f"Exception converting {rule_file.name}: {e}")
 
-    log.info(
-        f"Conversion complete: {converted_count} files converted, {failed_count} failed"
-    )
+    log.info(f"Conversion complete: {converted_count} files converted, {failed_count} failed")
     if total_rejected > 0:
         log.warning(f"Total rules rejected across all files: {total_rejected}")
 
@@ -167,6 +188,7 @@ def convert_snort2_to_snort3_rules(rules_path, working_dir):
         return None
 
     return converted_path
+
 
 
 def convert_rules_file_individually(input_file, output_file):
@@ -205,7 +227,7 @@ def convert_rules_file_individually(input_file, output_file):
                 temp_output = temp_dir / f"conv_{line_num}.rules"
 
                 # Try to convert single rule
-                command = f"snort2lua -c {tmp_path} -r {temp_output}"
+                command = f"{snort2lua_path} -c {tmp_path} -r {temp_output}"
                 process = Popen(
                     command,
                     stdout=PIPE,

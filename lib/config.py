@@ -159,12 +159,9 @@ class Config:
                     out_list.append(thing)
             return out_list
 
-            if not self.defined("snort2lua_path"):
+            if not os.path.isfile(self.snort2lua_path):
+                log.warning(f"snort2lua not found at: {self.snort2lua_path}")
                 self.snort2lua_path = "snort2lua"
-            else:
-                if not os.path.isfile(self.snort2lua_path):
-                    log.warning(f"snort2lua not found at: {self.snort2lua_path}")
-                    self.snort2lua_path = "snort2lua"
 
         # Otherwise create a list from the value
         # Check for local_rules_folder if in update mode
@@ -378,8 +375,19 @@ class Config:
         elif self.defined("modifysid"):
             self.modifysid = Path(self.modifysid)
 
+        if not self.defined("snort2lua_path"):
+            snort2lua_search = Path("/usr").rglob("snort2lua")
+            for snort2lua in snort2lua_search:
+                if snort2lua.is_file():
+                    self.snort2lua_path = snort2lua
+        else:
+            self.snort2lua_path = Path(self.snort2lua_path)
+            if not self.snort2lua_path.is_file():
+                log.debug(f"snort2lua Path invalid {self.snort2lua_path}")
+
         self.no_backup = True
         if self.defined("no_backup"):
             self.no_backup = bool(self.no_backup)
 
         log.debug("Exiting: Config.validate()")
+

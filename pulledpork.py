@@ -285,9 +285,16 @@ def update_mode(conf, loaded_rulesets, working_dir):
 
         elif loaded_ruleset.ruleset == RulesetTypes.EMERGING_THREATS:
 
-            log.info("Processing Emerging Threats ruleset for updates")
+            converted_path = helpers.convert_snort2_to_snort3_rules(conf.snort2lua_path, ruleset_path.joinpath("rules"), working_dir)
+
+            if converted_path and converted_path.exists():
+                # Use converted rules
+                thresholds = converted_path / "et_thresholds.lua"
+                if thresholds.exists():
+                    log.verbose(f" - Threshold config emitted: {thresholds}")
+                log.info("Processing Emerging Threats ruleset for updates")
             merge_rules_path(
-                conf, conf.local_rules_folder, ruleset_path.joinpath("rules")
+                conf, conf.local_rules_folder, converted_path
             )
 
         elif loaded_ruleset.ruleset == RulesetTypes.LIGHTSPD:
@@ -626,10 +633,14 @@ def emerging_threats_rules_processing(conf, ruleset_path, working_dir):
         log.info("Detected Snort 3 - converting ET rules from Snort 2 format")
 
         # Convert the rules
-        converted_path = helpers.convert_snort2_to_snort3_rules(text_rules_path, working_dir)
+        converted_path = helpers.convert_snort2_to_snort3_rules(conf.snort2lua_path, text_rules_path, working_dir)
 
         if converted_path and converted_path.exists():
             # Use converted rules
+            thresholds = converted_path / "et_thresholds.lua"
+            if thresholds.exists():
+                log.verbose(f" - Threshold config emitted: {thresholds}")
+
             registered_rules = Rules(converted_path, conf.ignored_files)
             log.verbose(f" - Converted Rules:  {registered_rules}")
         else:
