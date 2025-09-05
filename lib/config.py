@@ -327,6 +327,10 @@ class Config:
             log.warning(
                 "`blocklist_path` is configured but no blocklists have been specified for download"
             )
+        if self.defined("blocklist_path"):
+            self.blocklist_path = Path(self.blocklist_path)
+            if not self.blocklist_path.parent.exists():
+                log.warning("`blocklist_path` does not exist")
 
         # Do we need to ensure distro is set in config?
 

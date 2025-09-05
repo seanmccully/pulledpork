@@ -285,22 +285,33 @@ def update_mode(conf, loaded_rulesets, working_dir):
 
         elif loaded_ruleset.ruleset == RulesetTypes.EMERGING_THREATS:
 
-            converted_path = helpers.convert_snort2_to_snort3_rules(conf.snort2lua_path, ruleset_path.joinpath("rules"), working_dir)
+            converted_path = helpers.convert_snort2_to_snort3_rules(conf.snort2lua_path,
+                                                                    ruleset_path.joinpath("rules"),
+                                                                    working_dir)
 
             if converted_path and converted_path.exists():
                 # Use converted rules
-                thresholds = converted_path / "et_thresholds.lua"
+                thresholds = converted_path.joinpath("et_thresholds.lua")
                 if thresholds.exists():
                     log.verbose(f" - Threshold config emitted: {thresholds}")
+                    copy(thresholds, conf.local_rules_folder)
                 log.info("Processing Emerging Threats ruleset for updates")
             merge_rules_path(
                 conf, conf.local_rules_folder, converted_path
             )
+            compromised = ruleset_path.joinpath('rules', 'compromised-ips.txt')
+            if compromised.exists():
+                log.verbose(" - ET Compromised IPs loaded.")
+                blocklist = Blocklist(filename=conf.blocklist_path)
+                blocklist.load_file(compromised)
+                blocklist.write_file(conf.blocklist_path,
+                                     create_blocklist_header(conf))
 
         elif loaded_ruleset.ruleset == RulesetTypes.LIGHTSPD:
             # Similar processing for LightSPD if needed
             log.info("Processing LightSPD ruleset for updates")
-            lightspd_rules, lightspd_policies = process_rules_files(conf, ruleset_path)
+            lightspd_rules, lightspd_policies = process_rules_files(conf,
+                                                                    ruleset_path)
 
             merge_rules_path_versions(
                 conf,
@@ -473,7 +484,7 @@ def pulled_pork_file_processing(conf, loaded_rulesets, working_dir):
     # -----------------------------------------------------------------------------
     # Download Blocklists
 
-    download_blocklists(conf)
+    download_blocklists(conf, loaded_rulesets)
     # -----------------------------------------------------------------------------
     # Relad Snort
 
@@ -637,9 +648,10 @@ def emerging_threats_rules_processing(conf, ruleset_path, working_dir):
 
         if converted_path and converted_path.exists():
             # Use converted rules
-            thresholds = converted_path / "et_thresholds.lua"
+            thresholds = converted_path.joinpath("et_thresholds.lua")
             if thresholds.exists():
                 log.verbose(f" - Threshold config emitted: {thresholds}")
+                copy(thresholds, conf.local_rules_folder)
 
             registered_rules = Rules(converted_path, conf.ignored_files)
             log.verbose(f" - Converted Rules:  {registered_rules}")
@@ -651,6 +663,12 @@ def emerging_threats_rules_processing(conf, ruleset_path, working_dir):
         registered_rules = Rules(text_rules_path, conf.ignored_files)
         log.verbose(f" - Text Rules:  {registered_rules}")
 
+    compromised = text_rules_path.joinpath('compromised-ips.txt')
+    if compromised.exists():
+        log.verbose(" - ET Compromised IPs loaded.")
+        blocklist = Blocklist(filename=compromised)
+        et_blocklist = conf.blocklist_path.parent.joinpath('compromised-ips')
+        blocklist.write_file(et_blocklist, create_blocklist_header(conf))
     # ET rules don't come with policies, so we don't process them
     log.debug(f" - Text Rules:  {registered_rules}")
 
@@ -896,9 +914,30 @@ def process_lightspd_files(conf, ruleset_path, working_dir):
         log.debug("No so rules to process.")
     return lightspd_rules, lightspd_policies
 
+def create_blocklist_header(conf):
+    # Compose the blocklist header and write the blocklist file
+    blocklist_header = (
+        "#-------------------------------------------------------------------\n"
+    )
+    blocklist_header += (
+        f"# BLOCKLIST CREATED BY {SCRIPT_NAME.upper()} ON {conf.start_time}\n#\n"
+    )
+    blocklist_header += (
+        "# To Use this file, in your snort.lua, you need the following settings:\n"
+    )
+    blocklist_header += "# reputation = \n"
+    blocklist_header += "# {{\n"
+    blocklist_header += f'#     blocklist = "{conf.blocklist_path}",\n'
+    blocklist_header += "#     ...\n"
+    blocklist_header += "# }}\n"
+    blocklist_header += "#\n#-------------------------------------------------------------------\n\n"
+    return blocklist_header
 
-def download_blocklists(conf):
+
+def download_blocklists(conf, loaded_rulesets):
     # Have a blocklist out file defined AND have a blocklist to download?
+    # Prepare an empty blocklist
+    new_blocklist = Blocklist()
     if conf.defined("blocklist_path") and any(
         [conf.snort_blocklist, conf.et_blocklist, len(conf.blocklist_urls)]
     ):
@@ -906,8 +945,6 @@ def download_blocklists(conf):
         log.debug("---------------------------------")
         log.verbose("Processing blocklists")
 
-        # Prepare an empty blocklist
-        new_blocklist = Blocklist()
 
         # Downloading the Snort blocklist?
         if conf.snort_blocklist:
@@ -933,28 +970,24 @@ def download_blocklists(conf):
             except Exception as e:
                 log.warning(f"Unable to download blocklist:  {e}")
 
-        # Compose the blocklist header and write the blocklist file
-        blocklist_header = (
-            "#-------------------------------------------------------------------\n"
-        )
-        blocklist_header += (
-            f"# BLOCKLIST CREATED BY {SCRIPT_NAME.upper()} ON {conf.start_time}\n#\n"
-        )
-        blocklist_header += (
-            "# To Use this file, in your snort.lua, you need the following settings:\n"
-        )
-        blocklist_header += "# reputation = \n"
-        blocklist_header += "# {{\n"
-        blocklist_header += f'#     blocklist = "{conf.blocklist_path}",\n'
-        blocklist_header += "#     ...\n"
-        blocklist_header += "# }}\n"
-        blocklist_header += "#\n#-------------------------------------------------------------------\n\n"
-
         log.info(f"Writing blocklist file to:  {conf.blocklist_path}")
-        try:
-            new_blocklist.write_file(conf.blocklist_path, blocklist_header)
-        except Exception as e:
-            log.warning(f"Unable to write blocklist:  {e}")
+
+    for loaded_ruleset in loaded_rulesets:
+
+        # Save the extracted path to a shorter named var
+        ruleset_path = loaded_ruleset.extracted_path
+        if loaded_ruleset.ruleset == RulesetTypes.EMERGING_THREATS:
+
+
+            compromised = ruleset_path.joinpath('rules', 'compromised-ips.txt')
+            if compromised.exists():
+                log.verbose(" - ET Compromised IPs loaded.")
+                new_blocklist.load_file(compromised)
+
+    try:
+        new_blocklist.write_file(conf.blocklist_path, create_blocklist_header(conf))
+    except Exception as e:
+        log.warning(f"Unable to write blocklist:  {e}")
 
 
 def reload_snort(conf):

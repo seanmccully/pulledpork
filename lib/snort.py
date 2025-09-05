@@ -10,6 +10,7 @@ from pathlib import Path
 import requests
 
 from . import logger
+from . import helpers
 
 
 __all__ = [
@@ -192,6 +193,8 @@ class Blocklist:
         # Get a list of blocklist lines to process
         if isinstance(blocklist, str):
             blocklist = blocklist.splitlines()
+        elif isinstance(blocklist, bytes):
+            blocklist = blocklist.decode('utf-8').splitlines()
         elif isinstance(blocklist, Blocklist):
             if source is None:
                 source = "Blocklist Object"
@@ -216,14 +219,12 @@ class Blocklist:
             # Empty lines will be dropped
             if not line:
                 continue
-
-            # Apply all comments
-            if line.startswith("#"):
-                self._lines.append(line)
-
             # De-dupe the lines on ingest
             if line in self._lines:
                 continue
+            # Apply all comments
+            elif line.startswith("#"):
+                self._lines.append(line)
 
             # Add the new line
             self._lines.append(line)
@@ -249,11 +250,15 @@ class Blocklist:
         """
 
         # Download the URL, and check response status
-        resp = requests.get(blocklist_url)
-        resp.raise_for_status()
+        if 'snort.org' in blocklist_url:
+            resp = helpers.download_signed_form(blocklist_url)
+            self.extend(resp, source=f"url - {blocklist_url}")
+        else:
+            resp = requests.get(blocklist_url)
+            resp.raise_for_status()
 
         # Extend this blocklist with the downloaded content
-        self.extend(resp.text, source=f"url - {blocklist_url}")
+            self.extend(resp.text, source=f"url - {blocklist_url}")
 
     def load_file(self, blocklist_file):
         """
@@ -490,9 +495,7 @@ class Rules:
                 if new_rule.rule_id in self._all_rules:
                     current_rule = self[new_rule.rule_id]
                     if int(current_rule.rev) >= int(new_rule.rev):
-                        log.verbose(
-                            f"{rules_file}:{line_num} - Duplicate rule_id with same/earlier rev; skipping"
-                        )
+                        # Duplicate rule_id rev; skipping
                         continue
 
                 self._all_rules[new_rule.rule_id] = new_rule
@@ -976,9 +979,7 @@ class Rules:
 
                 # If the current rule has a later or same rev, move on
                 if current_rule.rev >= new_rule.rev:
-                    log.verbose(
-                        "Duplicate rule_id " "with same/earlier " "rev; skipping"
-                    )
+                    # Duplicate rule_id rev; skipping
                     continue
 
             # Save the rule to cache
